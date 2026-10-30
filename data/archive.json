@@ -1,0 +1,52 @@
+[
+  {
+    "id": "ARC-001",
+    "title": "Final Shutdown Notice",
+    "type": "announcement",
+    "date": "2009-10-12",
+    "author": "site_admin",
+    "content": "After several years online, the owners announce that the website will shut down at the end of October 12. They thank the community and say the public pages will no longer be updated.",
+    "tags": ["shutdown", "announcement", "website"],
+    "reliability": "high"
+  },
+  {
+    "id": "ARC-002",
+    "title": "The Last Forum Post",
+    "type": "forum_post",
+    "date": "2009-10-15",
+    "author": "night_owl",
+    "content": "I thought this place was already closed, but a fresh reply counter appeared beside thread 17 tonight. Did anyone else see activity after the shutdown notice?",
+    "tags": ["forum", "night_owl", "thread-17", "activity"],
+    "reliability": "medium"
+  },
+  {
+    "id": "ARC-003",
+    "title": "The Strange Guestbook Entry",
+    "type": "guestbook_entry",
+    "date": "2009-10-16",
+    "author": "anonymous",
+    "content": "You were looking at the wrong copy. Stop trusting the dates.",
+    "tags": ["guestbook", "anonymous", "copy", "dates"],
+    "reliability": "low"
+  },
+  {
+    "id": "ARC-004",
+    "title": "Mirror Server Log",
+    "type": "server_log",
+    "date": "2009-10-15",
+    "author": "archive_monitor",
+    "content": "Request for /mirror/forum/thread-17.html returned status 200 from host mirror-02.",
+    "tags": ["mirror", "server-log", "thread-17", "status-200"],
+    "reliability": "high"
+  },
+  {
+    "id": "ARC-005",
+    "title": "A Forgotten User Profile",
+    "type": "user_profile",
+    "date": "2009-10-10",
+    "author": "night_owl",
+    "content": "Profile note: I keep local copies of websites I care about, in case a page disappears before anyone has saved it.",
+    "tags": ["night_owl", "profile", "copies", "preservation"],
+    "reliability": "medium"
+  }
+]

@@ -42,6 +42,7 @@ interface CuratorPanelProps {
   isAsking: boolean;
   error: string;
   result: CuratorResponse | null;
+  askedQuestion: string;
   onSourceOpen: (id: string) => void;
   onClose?: () => void;
 }
@@ -150,6 +151,7 @@ function CuratorPanel({
   isAsking,
   error,
   result,
+  askedQuestion,
   onSourceOpen,
   onClose,
 }: CuratorPanelProps) {
@@ -191,6 +193,7 @@ function CuratorPanel({
       {isAsking && <p className="curator-loading" role="status"><span className="loading-mark" /> Reviewing archive evidence…</p>}
       {result && (
         <div className="curator-response" aria-live="polite">
+          {askedQuestion && <p className="asked-question"><span>YOUR QUESTION</span>{askedQuestion}</p>}
           <p className="micro-label">CURATOR RESPONSE</p>
           <p className="curator-answer">{result.answer}</p>
           <div className="source-block">
@@ -234,8 +237,11 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   const [isAsking, setIsAsking] = useState(false);
   const [curatorError, setCuratorError] = useState("");
   const [curatorResult, setCuratorResult] = useState<CuratorResponse | null>(null);
+  const [lastQuestion, setLastQuestion] = useState("");
   const [documentOpen, setDocumentOpen] = useState(false);
   const [floatingCuratorOpen, setFloatingCuratorOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [directoryOpen, setDirectoryOpen] = useState(true);
   const [atmosphereEnabled, setAtmosphereEnabled] = useState(true);
   const theme = useSyncExternalStore(subscribeToTheme, getThemeSnapshot, getServerThemeSnapshot);
   const curatorRequestLock = useRef(false);
@@ -395,6 +401,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
 
     curatorRequestLock.current = true;
     setIsAsking(true);
+    setLastQuestion(prompt);
     setCuratorResult(null);
     try {
       const response = await fetch("/api/curator", {
@@ -473,6 +480,21 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
             </button>
           </div>
         </div>
+        <div className="legacy-toolbar">
+          <div className="legacy-menu" aria-hidden="true"><span>File</span><span>Edit</span><span>View</span><span>Favorites</span><span>Tools</span><span>Help</span></div>
+          <div className="legacy-actions" aria-hidden="true">
+            <span><b>←</b> Back</span><span><b>→</b> Forward</span><span><b>×</b> Stop</span><span><b>↻</b> Refresh</span><span><b>⌂</b> Home</span><span><b>⌕</b> Search</span>
+          </div>
+          <button
+            className="tool-drawer-toggle"
+            type="button"
+            aria-expanded={toolsOpen}
+            aria-controls="investigation-tools"
+            onClick={() => setToolsOpen((open) => !open)}
+          >
+            <span aria-hidden="true">▤</span> FIELD TOOLS <b>{savedRecords.length.toString().padStart(2, "0")}</b>
+          </button>
+        </div>
         <div className="address-row">
           <span className="address-label">LOCATION</span>
           <div className="address-field"><span aria-hidden="true">⌁</span> http://october-16.net/archived/</div>
@@ -481,13 +503,24 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
 
         <div className="site-banner">
           <div className="site-wordmark"><span className="site-emblem">O</span><div><strong>OCTOBER<br />ONLINE</strong><small>community pages · est. 1998</small></div></div>
-          <div className="site-banner-note"><span>LAST RECOVERED PING</span><strong>2009.10.16 / 23:41:08</strong></div>
+          <div className="site-banner-note"><span>LOCAL RECOVERY COPY</span><strong>READ ONLY / 05 FILES</strong></div>
         </div>
 
         <div className="investigation-layout">
           <aside className="index-rail">
-            <div className="rail-heading"><span>DIRECTORY</span><span>05 FILES</span></div>
-            <nav className="archive-nav" aria-label="Archive sections">
+            <div className="rail-heading">
+              <span>DIRECTORY</span><span>05 FILES</span>
+              <button
+                className="directory-toggle"
+                type="button"
+                aria-expanded={directoryOpen}
+                aria-controls="archive-section-nav"
+                onClick={() => setDirectoryOpen((open) => !open)}
+              >
+                {directoryOpen ? "HIDE" : "SHOW"} INDEX
+              </button>
+            </div>
+            <nav id="archive-section-nav" className="archive-nav" aria-label="Archive sections" hidden={!directoryOpen}>
               {sections.map((item, index) => {
                 const count = item.type ? archive.filter(({ type }) => type === item.type).length : archive.length;
                 return (
@@ -520,7 +553,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
           <section className="archive-content" id="archive-records" aria-label="Archive records">
             <div className="content-topline">
               <div>
-                <p className="micro-label">RECOVERED DOCUMENTS <span>/</span> {searchResults ? "SEARCH RESULTS" : activeSectionLabel.toUpperCase()}</p>
+                <p className="micro-label">ARCHIVED FILES <span>/</span> {searchResults ? "SEARCH RESULTS" : activeSectionLabel.toUpperCase()}</p>
                 <h2>{searchResults ? `Matches for “${searchQuery.trim()}”` : activeSectionLabel}</h2>
               </div>
               <span className="record-count">{isSearching ? "SEARCHING…" : `${visibleRecords.length.toString().padStart(2, "0")} RECORD${visibleRecords.length === 1 ? "" : "S"}`}</span>
@@ -548,6 +581,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
               <div className="empty-state"><span className="empty-symbol">∅</span><strong>No records found</strong><p>Try another term or return to the archived home page.</p>{searchResults && <button type="button" className="text-button" onClick={clearSearch}>Show all records</button>}</div>
             ) : (
               <div className="record-list" aria-label="Matching archive records">
+                <div className="record-list-heading" aria-hidden="true"><span>DOCUMENT / CONTRIBUTOR</span><span>DATE / RELIABILITY</span></div>
                 {visibleRecords.map((record, index) => (
                   <button
                     type="button"
@@ -566,7 +600,10 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
                     </span>
                     <span className="record-row-side">
                       <time dateTime={record.date}>{record.date}</time>
-                      <i className={`reliability-dot ${record.reliability}`} title={reliabilityLabel[record.reliability]} />
+                      <span className={`record-reliability ${record.reliability}`}>
+                        <i className={`reliability-dot ${record.reliability}`} />
+                        <span>{record.reliability}</span>
+                      </span>
                     </span>
                   </button>
                 ))}
@@ -575,7 +612,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
 
           </section>
 
-          <aside className="utility-rail" aria-label="Investigation tools">
+          <aside id="investigation-tools" className="utility-rail" aria-label="Investigation tools" hidden={!toolsOpen}>
             <section className="notebook-panel" aria-labelledby="notebook-title">
               <div className="panel-heading">
                 <div><p className="micro-label">PLAYER TOOL / 01</p><h2 id="notebook-title">Evidence notebook</h2></div>
@@ -607,6 +644,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
               isAsking={isAsking}
               error={curatorError}
               result={curatorResult}
+              askedQuestion={lastQuestion}
               onSourceOpen={openRecord}
             />
           </aside>
@@ -679,6 +717,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
               isAsking={isAsking}
               error={curatorError}
               result={curatorResult}
+              askedQuestion={lastQuestion}
               onSourceOpen={openRecord}
               onClose={() => setFloatingCuratorOpen(false)}
             />

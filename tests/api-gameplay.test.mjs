@@ -169,3 +169,121 @@ test("progress parser validates IDs, and storage failures are reported", () => {
   assert.equal(progress.persistEvidenceIds({ setItem(key, value) { persisted = [key, value]; } }, "evidence", ["ARC-006"]), true);
   assert.deepEqual(persisted, ["evidence", '["ARC-006"]']);
 });
+
+
+test("reproduces exact bug submission: preserves roles, explains ARC-007, and avoids spurious missing complicating record feedback", async () => {
+  const unresolvedQuestion = "You suggest ARC-008 might indicate a ghost or another presence.";
+  const response = await theoryRoute.POST(jsonRequest("http://localhost/api/theory", {
+    theoryId: "orphaned_process",
+    supportingEvidenceIds: ["ARC-003", "ARC-008"],
+    counterEvidenceIds: ["ARC-007"],
+    unresolvedQuestion,
+    collectedEvidenceIds: ["ARC-003", "ARC-007", "ARC-008"],
+  }));
+  assert.equal(response.status, 200);
+  const { evaluation } = await response.json();
+
+  // Roles and theory transmitted and preserved
+  assert.equal(evaluation.theoryId, "orphaned_process");
+  assert.deepEqual(evaluation.supportingEvidenceIds, ["ARC-003", "ARC-008"]);
+  assert.deepEqual(evaluation.counterEvidenceIds, ["ARC-007"]);
+
+  // Evaluator assessments
+  assert.equal(evaluation.theoryAssessment, "not-established");
+  assert.equal(evaluation.reasoningAssessment, "developing");
+
+  const feedbackText = evaluation.feedback.join("\n");
+
+  // Acknowledges player marked ARC-007 as complicating
+  assert.match(feedbackText, /You marked ARC-007 as complicating evidence/i);
+  // Explains ARC-007 timestamp distinction
+  assert.match(feedbackText, /ARC-007 distinguishes the original record timestamp from the mirror export timestamp/i);
+  // Explains it does not decisively contradict orphaned-process theory
+  assert.match(feedbackText, /The selected complicating evidence does not decisively contradict this theory/i);
+
+  // Crucial: Must NEVER claim no complicating record was identified when one was submitted
+  assert.equal(evaluation.feedback.includes("The submission does not yet identify a recovered record that complicates this theory."), false);
+  assert.equal(/no record was selected to complicate/i.test(feedbackText), false);
+
+  // Supporting records limitations explained without changing their role
+  assert.match(feedbackText, /Some selected support records fit better as context or counter-evidence: ARC-003, ARC-008/i);
+  assert.match(feedbackText, /unknown author and low reliability/i);
+  assert.match(feedbackText, /genuine unresolved anomaly/i);
+
+  // Unresolved question retained
+  assert.match(feedbackText, /Your unresolved question is retained as part of the completed investigation/i);
+
+  // Evaluator does not claim operator is known or every anomaly explained
+  assert.match(evaluation.conclusion, /does not establish the source of every anomaly or identify the operator/i);
+  assert.equal(/operator.*identified/i.test(feedbackText), false);
+  assert.equal(/every anomaly.*explained/i.test(feedbackText), false);
+});
+
+test("theory route enforces minimum requirement of 2 supporting and 1 complicating record", async () => {
+  const underSupported = await theoryRoute.POST(jsonRequest("http://localhost/api/theory", {
+    theoryId: "orphaned-process",
+    supportingEvidenceIds: ["ARC-006"],
+    counterEvidenceIds: ["ARC-007"],
+    unresolvedQuestion: "Valid length question?",
+    collectedEvidenceIds: ["ARC-006", "ARC-007"],
+  }));
+  assert.equal(underSupported.status, 400);
+  assert.match((await underSupported.json()).error, /at least two supporting records and one record that complicates/i);
+
+  const noCounter = await theoryRoute.POST(jsonRequest("http://localhost/api/theory", {
+    theoryId: "orphaned-process",
+    supportingEvidenceIds: ["ARC-006", "ARC-004"],
+    counterEvidenceIds: [],
+    unresolvedQuestion: "Valid length question?",
+    collectedEvidenceIds: ["ARC-006", "ARC-004"],
+  }));
+  assert.equal(noCounter.status, 400);
+  assert.match((await noCounter.json()).error, /at least two supporting records and one record that complicates/i);
+});
+
+test("evaluator correctly identifies missing complicating record when none is submitted", () => {
+  const result = story.evaluateTheory({
+    theoryId: "orphaned-process",
+    supportingEvidenceIds: ["ARC-006", "ARC-004"],
+    counterEvidenceIds: [],
+    unresolvedQuestion: "Valid length question?",
+  }, archive, new Date().toISOString());
+
+  assert.equal(result.feedback.includes("The submission does not yet identify a recovered record that complicates this theory."), true);
+  assert.equal(result.reasoningAssessment, "developing");
+});
+
+test("theory route rejects invalid theory IDs, missing or unknown evidence, duplicate IDs, and malformed bodies", async () => {
+  const base = {
+    theoryId: "orphaned-process",
+    supportingEvidenceIds: ["ARC-006", "ARC-004"],
+    counterEvidenceIds: ["ARC-008"],
+    unresolvedQuestion: "What happened?",
+    collectedEvidenceIds: ["ARC-006", "ARC-004", "ARC-008"],
+  };
+  assert.equal((await theoryRoute.POST(jsonRequest("http://localhost/api/theory", { ...base, theoryId: "alien-intervention" }))).status, 400);
+  assert.equal((await theoryRoute.POST(jsonRequest("http://localhost/api/theory", { ...base, theoryId: 123 }))).status, 400);
+  assert.equal((await theoryRoute.POST(jsonRequest("http://localhost/api/theory", { ...base, counterEvidenceIds: ["ARC-999"] }))).status, 400);
+  assert.equal((await theoryRoute.POST(jsonRequest("http://localhost/api/theory", { theoryId: "orphaned-process", supportingEvidenceIds: ["ARC-006", "ARC-004"], collectedEvidenceIds: ["ARC-006", "ARC-004"] }))).status, 400);
+  assert.equal((await theoryRoute.POST(jsonRequest("http://localhost/api/theory", { ...base, counterEvidenceIds: ["ARC-008", "ARC-008"] }))).status, 400);
+  assert.equal((await theoryRoute.POST(jsonRequest("http://localhost/api/theory", { ...base, supportingEvidenceIds: ["ARC-006", "ARC-008"], counterEvidenceIds: ["ARC-008"] }))).status, 400);
+  assert.equal((await theoryRoute.POST(new Request("http://localhost/api/theory", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "not-json{",
+  }))).status, 400);
+});
+
+test("interface keeps canonical finding strictly separated from player-authored hypotheses", () => {
+  const interfaceSource = fs.readFileSync(path.resolve("app/investigation-interface.tsx"), "utf8");
+
+  const conclusionSectionMatch = interfaceSource.match(/<section className="theory-conclusion"[^>]*>([\s\S]*?)<\/section>/);
+  assert(conclusionSectionMatch, "theory-conclusion section exists");
+  assert.equal(conclusionSectionMatch[1].includes("unresolvedQuestion"), false);
+  assert.equal(conclusionSectionMatch[1].includes("Still unresolved"), false);
+
+  const hypothesisSectionMatch = interfaceSource.match(/<section className="theory-hypothesis"[^>]*>([\s\S]*?)<\/section>/);
+  assert(hypothesisSectionMatch, "theory-hypothesis section exists");
+  assert.match(hypothesisSectionMatch[1], /PLAYER-AUTHORED HYPOTHESIS/);
+  assert(hypothesisSectionMatch[1].includes("unresolvedQuestion"));
+});

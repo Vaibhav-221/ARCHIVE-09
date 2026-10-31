@@ -1,8 +1,23 @@
 export const GAME_PROGRESS_KEY = "archive-09:game-progress";
 export const GAME_PROGRESS_VERSION = 1;
 
-export const THEORY_IDS = ["orphaned-process", "human-maintained", "autonomous-operator"] as const;
+export const THEORY_IDS = [
+  "orphaned-process",
+  "human-maintained",
+  "autonomous-operator",
+  "orphaned_process",
+  "human_maintained",
+  "autonomous_operator",
+] as const;
 export type TheoryId = (typeof THEORY_IDS)[number];
+
+export function normalizeTheoryId(value: string): "orphaned-process" | "human-maintained" | "autonomous-operator" | null {
+  const normalized = value.replace(/_/g, "-");
+  if (normalized === "orphaned-process" || normalized === "human-maintained" || normalized === "autonomous-operator") {
+    return normalized;
+  }
+  return null;
+}
 
 export interface TheorySubmission {
   theoryId: TheoryId;

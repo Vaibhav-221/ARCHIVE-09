@@ -1092,6 +1092,8 @@ html[data-theme="dark"] .guide-signoff { border-color:#414b43; color:#d3a879 !im
 .theory-conclusion h3 { margin:4px 0 6px; color:#35392e; font:500 18px Georgia,"Times New Roman",serif; }
 .theory-conclusion > p:not(.micro-label) { margin:0; color:#53564a; font:12px/1.6 var(--font-sans); }
 .theory-conclusion .theory-open-question { margin-top:11px !important; padding-top:9px; border-top:1px solid #c8bea3; font-style:italic !important; }
+.theory-hypothesis { margin-top:12px; padding:12px 14px; border:1px solid #cbc5b2; background:#f4f0e2; }
+.theory-hypothesis-text { margin:4px 0 0; color:#55594e; font:italic 12px/1.5 var(--font-sans); }
 .theory-cited-records { margin-top:13px; }
 .theory-cited-records > div { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
 .theory-cited-records button { padding:6px 8px; border:1px solid #cac5b2; background:#f8f6eb; color:#4f5b4c; cursor:pointer; font:9px var(--font-mono); }
@@ -1130,6 +1132,8 @@ html[data-theme="dark"] .theory-conclusion { border-color:#4b5648; background:#2
 html[data-theme="dark"] .theory-conclusion h3 { color:#e1dfd2; }
 html[data-theme="dark"] .theory-conclusion > p:not(.micro-label) { color:#c3c7b9; }
 html[data-theme="dark"] .theory-conclusion .theory-open-question { border-color:#414b40; }
+html[data-theme="dark"] .theory-hypothesis { border-color:#3a453f; background:#1b2420; }
+html[data-theme="dark"] .theory-hypothesis-text { color:#b8c0b3; }
 html[data-theme="dark"] .theory-cited-records button { border-color:#3c4741; background:#202826; color:#c2c9bf; }
 html[data-theme="dark"] .theory-cited-records button span { color:#d0ad78; }
 html[data-theme="dark"] .theory-revise { border-color:#657063; color:#d0d3c6; }

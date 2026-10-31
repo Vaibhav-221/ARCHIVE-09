@@ -186,7 +186,8 @@ function saveProgress(progress: PersistedGameProgress): boolean {
 function isTheoryResult(value: unknown): value is TheoryResult {
   if (typeof value !== "object" || value === null) return false;
   const result = value as Record<string, unknown>;
-  return typeof result.theoryId === "string" && ["orphaned-process", "human-maintained", "autonomous-operator"].includes(result.theoryId)
+  const validIds = ["orphaned-process", "human-maintained", "autonomous-operator", "orphaned_process", "human_maintained", "autonomous_operator"];
+  return typeof result.theoryId === "string" && validIds.includes(result.theoryId)
     && (result.theoryAssessment === "best-supported" || result.theoryAssessment === "plausible-not-proven" || result.theoryAssessment === "not-established")
     && (result.reasoningAssessment === "careful" || result.reasoningAssessment === "developing")
     && Array.isArray(result.supportingEvidenceIds) && result.supportingEvidenceIds.every((id) => typeof id === "string")
@@ -877,7 +878,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
               <span className="micro-label">PARTIAL REVEAL / {theoryResult.endingId.toUpperCase()}</span>
               <span className={`theory-assessment ${theoryResult.theoryAssessment}`}>{theoryResult.theoryAssessment.replaceAll("-", " ").toUpperCase()}</span>
             </div>
-            <p className="theory-reasoning-label">YOUR THEORY: {theoryOptions.find((option) => option.id === theoryResult.theoryId)?.title.toUpperCase()}</p>
+            <p className="theory-reasoning-label">YOUR THEORY: {theoryOptions.find((option) => option.id === theoryResult.theoryId || option.id === theoryResult.theoryId.replace(/_/g, "-"))?.title.toUpperCase()}</p>
             <p className="theory-reasoning-label">REASONING: {theoryResult.reasoningAssessment.toUpperCase()}</p>
             <ul className="theory-feedback">
               {theoryResult.feedback.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
@@ -886,7 +887,10 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
               <p className="micro-label">CANONICAL FINDING</p>
               <h3 id="conclusion-title">The Process That Remained</h3>
               <p>{theoryResult.conclusion}</p>
-              <p className="theory-open-question"><strong>Still unresolved:</strong> {gameProgress?.submission?.unresolvedQuestion || "Who, or what, originated the remaining anomalies?"}</p>
+            </section>
+            <section className="theory-hypothesis" aria-label="Player-authored hypothesis">
+              <p className="micro-label">PLAYER-AUTHORED HYPOTHESIS / UNRESOLVED QUESTION</p>
+              <p className="theory-hypothesis-text">{gameProgress?.submission?.unresolvedQuestion || "Who, or what, originated the remaining anomalies?"}</p>
             </section>
             <div className="theory-cited-records">
               <span className="source-heading">YOUR SUBMITTED EVIDENCE</span>

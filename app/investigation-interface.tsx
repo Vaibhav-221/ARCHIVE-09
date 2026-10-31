@@ -35,7 +35,6 @@ interface CuratorResponse {
 }
 
 interface CuratorPanelProps {
-  variant: "inline" | "floating";
   question: string;
   onQuestionChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -44,7 +43,6 @@ interface CuratorPanelProps {
   result: CuratorResponse | null;
   askedQuestion: string;
   onSourceOpen: (id: string) => void;
-  onClose?: () => void;
 }
 
 const NOTEBOOK_KEY = "archive-09:evidence-ids";
@@ -144,7 +142,6 @@ function persistSavedIds(ids: string[]) {
 }
 
 function CuratorPanel({
-  variant,
   question,
   onQuestionChange,
   onSubmit,
@@ -153,20 +150,18 @@ function CuratorPanel({
   result,
   askedQuestion,
   onSourceOpen,
-  onClose,
 }: CuratorPanelProps) {
-  const questionId = `${variant}-curator-question`;
-  const titleId = `${variant}-curator-title`;
+  const questionId = "curator-question";
+  const titleId = "curator-title";
 
   return (
-    <section className={`curator-panel${variant === "floating" ? " curator-panel-floating" : ""}`} aria-labelledby={titleId}>
+    <section className="curator-panel" aria-labelledby={titleId}>
       <div className="curator-heading">
         <div className="curator-seal" aria-hidden="true">C</div>
         <div className="curator-heading-copy">
           <p className="micro-label">ARCHIVE ASSISTANT / LOCAL</p>
           <h2 id={titleId}>Ask The Curator</h2>
         </div>
-        {onClose && <button className="curator-close" type="button" onClick={onClose} aria-label="Close Curator panel">×</button>}
       </div>
       <p className="panel-description">Ask about the recovered records. The Curator answers from retrieved evidence.</p>
       <form className="curator-form" onSubmit={onSubmit}>
@@ -179,7 +174,6 @@ function CuratorPanel({
           onChange={(event) => onQuestionChange(event.target.value)}
           placeholder="What happened after the shutdown notice?"
           disabled={isAsking}
-          autoFocus={variant === "floating"}
           aria-describedby={`${questionId}-help`}
         />
         <div className="curator-form-foot">
@@ -221,7 +215,9 @@ function CuratorPanel({
 
 export default function InvestigationInterface({ archive }: InvestigationInterfaceProps) {
   const [section, setSection] = useState<SectionKey>("home");
-  const [activeRecordId, setActiveRecordId] = useState<string | null>(archive[0]?.id ?? null);
+  const [activeRecordId, setActiveRecordId] = useState<string | null>(
+    archive.find(({ id }) => id === "ARC-003")?.id ?? archive[0]?.id ?? null
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<ArchiveRecord[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -239,14 +235,14 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   const [curatorResult, setCuratorResult] = useState<CuratorResponse | null>(null);
   const [lastQuestion, setLastQuestion] = useState("");
   const [documentOpen, setDocumentOpen] = useState(false);
-  const [floatingCuratorOpen, setFloatingCuratorOpen] = useState(false);
-  const [toolsOpen, setToolsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(true);
-  const [atmosphereEnabled, setAtmosphereEnabled] = useState(true);
   const theme = useSyncExternalStore(subscribeToTheme, getThemeSnapshot, getServerThemeSnapshot);
   const curatorRequestLock = useRef(false);
   const documentDialogRef = useRef<HTMLDialogElement>(null);
+  const aboutDialogRef = useRef<HTMLDialogElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const aboutReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const visibleRecords = useMemo(() => {
     if (searchResults) return searchResults;
@@ -276,13 +272,20 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   }, [activeRecord, documentOpen]);
 
   useEffect(() => {
-    if (!floatingCuratorOpen || documentOpen) return;
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setFloatingCuratorOpen(false);
+    const dialog = aboutDialogRef.current;
+    if (!dialog) return;
+
+    if (aboutOpen && !dialog.open) {
+      aboutReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      dialog.showModal();
+      dialog.querySelector<HTMLButtonElement>("[data-about-close]")?.focus();
+    } else if (!aboutOpen && dialog.open) {
+      dialog.close();
+      if (aboutReturnFocusRef.current?.isConnected) {
+        requestAnimationFrame(() => aboutReturnFocusRef.current?.focus({ preventScroll: true }));
+      }
     }
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [documentOpen, floatingCuratorOpen]);
+  }, [aboutOpen]);
 
   function selectSection(nextSection: SectionKey) {
     setDocumentOpen(false);
@@ -343,19 +346,13 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   function openRecord(id: string) {
     if (!archive.some((record) => record.id === id)) return;
     const current = document.activeElement;
-    if (current instanceof HTMLElement) {
-      const isFloatingCuratorSource = current.closest(".floating-curator-popover");
-      returnFocusRef.current = isFloatingCuratorSource
-        ? document.querySelector<HTMLElement>(".curator-launcher")
-        : current;
-    }
+    if (current instanceof HTMLElement) returnFocusRef.current = current;
     setSection("home");
     setSearchResults(null);
     setSearchQuery("");
     setSearchError("");
     setActiveRecordId(id);
     setDocumentOpen(true);
-    setFloatingCuratorOpen(false);
   }
 
   function closeDocument() {
@@ -431,7 +428,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   }
 
   return (
-    <main className={`archive-page${atmosphereEnabled ? " atmosphere-on" : " atmosphere-off"}`}>
+    <main className="archive-page atmosphere-on">
       <header className="case-masthead">
         <div className="masthead-mark" aria-hidden="true">09</div>
         <div className="masthead-copy">
@@ -450,6 +447,9 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
           <span aria-hidden="true">{theme === "dark" ? "☼" : "◐"}</span>
           {theme === "dark" ? "LIGHT MODE" : "DARK MODE"}
         </button>
+        <button className="about-toggle" type="button" onClick={() => setAboutOpen(true)} aria-haspopup="dialog">
+          ABOUT / HOW TO INVESTIGATE
+        </button>
       </header>
 
       <section className="incident-brief" aria-labelledby="incident-title">
@@ -461,39 +461,21 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
           <a className="begin-investigation" href="#archive-records">Begin with the recovered records <span aria-hidden="true">→</span></a>
         </div>
         <div className="incident-date"><span>WINDOW UNDER REVIEW</span><strong>12 — 16 OCT 2009</strong></div>
+        <span className="incident-ghost" aria-hidden="true"><i /><i /></span>
       </section>
 
       <section className="browser-window" aria-label="Fictional archived website browser">
         <div className="browser-chrome">
           <div className="browser-lights" aria-hidden="true"><span /><span /><span /></div>
           <div className="browser-caption"><strong>OCTOBER ONLINE — ARCHIVE VIEWER</strong><span>·</span> SESSION 09-1016</div>
-          <div className="connection-state">
-            <span className="connection-light" /> <span className="connection-copy">SNAPSHOT LOADED</span>
-            <button
-              className="atmosphere-toggle"
-              type="button"
-              aria-pressed={atmosphereEnabled}
-              onClick={() => setAtmosphereEnabled((enabled) => !enabled)}
-              title="Toggle subtle archive signal effects"
-            >
-              FX {atmosphereEnabled ? "ON" : "OFF"}
-            </button>
-          </div>
+          <div className="connection-state"><span className="connection-light" /> <span className="connection-copy">SNAPSHOT LOADED</span></div>
         </div>
         <div className="legacy-toolbar">
           <div className="legacy-menu" aria-hidden="true"><span>File</span><span>Edit</span><span>View</span><span>Favorites</span><span>Tools</span><span>Help</span></div>
           <div className="legacy-actions" aria-hidden="true">
             <span><b>←</b> Back</span><span><b>→</b> Forward</span><span><b>×</b> Stop</span><span><b>↻</b> Refresh</span><span><b>⌂</b> Home</span><span><b>⌕</b> Search</span>
           </div>
-          <button
-            className="tool-drawer-toggle"
-            type="button"
-            aria-expanded={toolsOpen}
-            aria-controls="investigation-tools"
-            onClick={() => setToolsOpen((open) => !open)}
-          >
-            <span aria-hidden="true">▤</span> FIELD TOOLS <b>{savedRecords.length.toString().padStart(2, "0")}</b>
-          </button>
+          <span className="toolbar-archive-label">ARCHIVE VIEW / READ ONLY</span>
         </div>
         <div className="address-row">
           <span className="address-label">LOCATION</span>
@@ -612,7 +594,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
 
           </section>
 
-          <aside id="investigation-tools" className="utility-rail" aria-label="Investigation tools" hidden={!toolsOpen}>
+          <aside id="investigation-tools" className="utility-rail" aria-label="Evidence notebook and Curator">
             <section className="notebook-panel" aria-labelledby="notebook-title">
               <div className="panel-heading">
                 <div><p className="micro-label">PLAYER TOOL / 01</p><h2 id="notebook-title">Evidence notebook</h2></div>
@@ -637,7 +619,6 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
             </section>
 
             <CuratorPanel
-              variant="inline"
               question={question}
               onQuestionChange={setQuestion}
               onSubmit={askCurator}
@@ -705,41 +686,46 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
           </article>
         </dialog>
       )}
-      <footer className="page-footer"><span>ARCHIVE 09</span><span>INVESTIGATION INTERFACE / PHASE 03</span><span>PROGRESS IS SAVED IN THIS BROWSER</span></footer>
-      <div className="floating-curator">
-        {floatingCuratorOpen && (
-          <div className="floating-curator-popover" id="floating-curator-panel" role="dialog" aria-labelledby="floating-curator-title">
-            <CuratorPanel
-              variant="floating"
-              question={question}
-              onQuestionChange={setQuestion}
-              onSubmit={askCurator}
-              isAsking={isAsking}
-              error={curatorError}
-              result={curatorResult}
-              askedQuestion={lastQuestion}
-              onSourceOpen={openRecord}
-              onClose={() => setFloatingCuratorOpen(false)}
-            />
+      <dialog
+        ref={aboutDialogRef}
+        className="about-dialog"
+        aria-labelledby="about-title"
+        onCancel={(event) => { event.preventDefault(); setAboutOpen(false); }}
+        onClick={(event) => { if (event.target === event.currentTarget) setAboutOpen(false); }}
+      >
+        <article className="about-sheet">
+          <header className="about-window-bar">
+            <div><span className="about-window-stamp">PLAYER FIELD GUIDE</span><span className="about-window-id">ARCHIVE 09 / 01</span></div>
+            <button className="about-close" data-about-close type="button" onClick={() => setAboutOpen(false)} aria-label="Close investigation guide">×</button>
+          </header>
+          <div className="about-body">
+            <p className="about-kicker">ARCHIVE 09 — THE INTERNET THAT FORGOT YOU</p>
+            <h2 id="about-title">How to investigate</h2>
+            <p className="about-intro">“Some websites disappear. Some records survive. Not every surviving record tells the truth.”</p>
+            <p>You are investigating the October 16 Incident through fragments recovered from October Online. Connect evidence, examine contradictions, and build a theory supported by the surviving records.</p>
+            <ol className="guide-steps">
+              <li><span>01</span><div><h3>Explore the archive</h3><p>Browse archived pages, forum posts, guestbook entries, user profiles, and server logs. Search by title, date, author, or a relevant term.</p></div></li>
+              <li><span>02</span><div><h3>Inspect suspicious records</h3><p>Open a record to examine its content, metadata, dates, author, and reliability where available. Look for unexpected activity and discrepancies.</p></div></li>
+              <li><span>03</span><div><h3>Collect evidence</h3><p>Use <strong>Save as Evidence</strong> in a record to add it to your notebook. Keep its archive ID so you can revisit and compare the source.</p></div></li>
+              <li><span>04</span><div><h3>Connect the clues</h3><p>Compare records instead of reading each alone. A forum post may describe activity while a server log records a request; neither fact explains the whole incident by itself.</p></div></li>
+              <li><span>05</span><div><h3>Question The Curator</h3><p>Ask specific questions about records and contradictions. Its local-model responses cite retrieved records, but check each claim against those sources.</p></div></li>
+              <li><span>06</span><div><h3>Form your theory</h3><p>Explain what you think happened on October 16, 2009. Prefer multiple independent records, and separate what the archive establishes from what you infer.</p></div></li>
+            </ol>
+            <section className="investigation-rules" aria-labelledby="rules-title">
+              <h3 id="rules-title">Keep in mind</h3>
+              <ul>
+                <li>A record is evidence, not automatically the truth.</li>
+                <li>Dates and timestamps may be disputed.</li>
+                <li>A successful server request does not prove the original site remained online.</li>
+                <li>The Curator can help interpret records; verify its claims against the cited sources.</li>
+                <li>Missing evidence and uncertainty are part of the investigation.</li>
+              </ul>
+            </section>
+            <p className="guide-signoff">Read the records. Compare the evidence. Question the dates.</p>
           </div>
-        )}
-        <button
-          className="curator-launcher"
-          type="button"
-          aria-label={floatingCuratorOpen ? "Close The Curator" : "Open The Curator"}
-          aria-expanded={floatingCuratorOpen}
-          aria-controls="floating-curator-panel"
-          aria-haspopup="dialog"
-          onClick={() => setFloatingCuratorOpen((open) => !open)}
-        >
-          <span className="launcher-bot" aria-hidden="true">
-            <span className="launcher-bot-antenna" />
-            <span className="launcher-bot-head"><i /><i /></span>
-          </span>
-          <span className="launcher-label">THE CURATOR</span>
-          <span className="launcher-state">LOCAL / READY</span>
-        </button>
-      </div>
+        </article>
+      </dialog>
+      <footer className="page-footer"><span>ARCHIVE 09</span><span>INVESTIGATION INTERFACE / PHASE 03</span><span>PROGRESS IS SAVED IN THIS BROWSER</span></footer>
     </main>
   );
 }

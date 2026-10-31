@@ -646,7 +646,10 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
           aria-haspopup="dialog"
           onClick={() => setFloatingCuratorOpen((open) => !open)}
         >
-          <span className="launcher-seal" aria-hidden="true">C</span>
+          <span className="launcher-bot" aria-hidden="true">
+            <span className="launcher-bot-antenna" />
+            <span className="launcher-bot-head"><i /><i /></span>
+          </span>
           <span className="launcher-label">THE CURATOR</span>
           <span className="launcher-state">LOCAL / READY</span>
         </button>

@@ -10,7 +10,17 @@ import {
   type MouseEvent,
   type SyntheticEvent,
 } from "react";
-import type { ArchiveRecord } from "@/lib/retrieval";
+import type { ArchiveRecord } from "@/lib/archive";
+import {
+  createEmptyGameProgress,
+  GAME_PROGRESS_KEY,
+  parseGameProgress,
+  persistEvidenceIds,
+  persistGameProgress,
+  type PersistedGameProgress,
+  type TheoryId,
+  type TheorySubmission,
+} from "@/lib/game-progress";
 
 type SectionKey = "home" | "forum" | "guestbook" | "profile" | "server";
 
@@ -32,6 +42,19 @@ interface CuratorSource {
 interface CuratorResponse {
   answer: string;
   sources: CuratorSource[];
+  fallback?: boolean;
+}
+
+interface TheoryResult {
+  theoryId: TheoryId;
+  theoryAssessment: "best-supported" | "plausible-not-proven" | "not-established";
+  reasoningAssessment: "careful" | "developing";
+  supportingEvidenceIds: string[];
+  counterEvidenceIds: string[];
+  feedback: string[];
+  conclusion: string;
+  endingId: "partial-reveal";
+  completedAt: string;
 }
 
 interface CuratorPanelProps {
@@ -54,12 +77,18 @@ const SERVER_NOTEBOOK_SNAPSHOT = "__archive_notebook_server__";
 const MAX_QUESTION_LENGTH = 1_000;
 let volatileNotebookSnapshot = "[]";
 
-const sections: { key: SectionKey; label: string; type?: string }[] = [
+const sections: { key: SectionKey; label: string; types?: ArchiveRecord["type"][] }[] = [
   { key: "home", label: "Archived home" },
-  { key: "forum", label: "Forum", type: "forum_post" },
-  { key: "guestbook", label: "Guestbook", type: "guestbook_entry" },
-  { key: "profile", label: "User profile", type: "user_profile" },
-  { key: "server", label: "Server log", type: "server_log" },
+  { key: "forum", label: "Forum", types: ["forum", "forum_capture"] },
+  { key: "guestbook", label: "Guestbook", types: ["guestbook"] },
+  { key: "profile", label: "User profile", types: ["profile"] },
+  { key: "server", label: "System records", types: ["server_log", "metadata_report", "system_trace"] },
+];
+
+const theoryOptions: { id: TheoryId; title: string; description: string }[] = [
+  { id: "orphaned-process", title: "The orphaned process", description: "A surviving maintenance task explains some of the mirror activity." },
+  { id: "human-maintained", title: "A human maintained the mirror", description: "Someone may have retained access to the surviving copy." },
+  { id: "autonomous-operator", title: "An autonomous operator", description: "The unexplained traces may point to behavior beyond ordinary maintenance." },
 ];
 
 const reliabilityLabel: Record<ArchiveRecord["reliability"], string> = {
@@ -131,14 +160,41 @@ function getSavedIds(snapshot: string, archive: ArchiveRecord[]): string[] {
   }
 }
 
-function persistSavedIds(ids: string[]) {
+function persistSavedIds(ids: string[]): boolean {
   volatileNotebookSnapshot = JSON.stringify(ids);
   try {
-    window.localStorage.setItem(NOTEBOOK_KEY, volatileNotebookSnapshot);
+    const saved = persistEvidenceIds(window.localStorage, NOTEBOOK_KEY, ids);
+    window.dispatchEvent(new Event(NOTEBOOK_EVENT));
+    return saved;
   } catch {
     // Keep notebook changes available for this session if browser storage is blocked.
+    window.dispatchEvent(new Event(NOTEBOOK_EVENT));
+    return false;
   }
-  window.dispatchEvent(new Event(NOTEBOOK_EVENT));
+}
+
+function saveProgress(progress: PersistedGameProgress): boolean {
+  try {
+    const notebookSaved = persistSavedIds(progress.evidenceIds);
+    const progressSaved = persistGameProgress(window.localStorage, progress);
+    return notebookSaved && progressSaved;
+  } catch {
+    return false;
+  }
+}
+
+function isTheoryResult(value: unknown): value is TheoryResult {
+  if (typeof value !== "object" || value === null) return false;
+  const result = value as Record<string, unknown>;
+  return typeof result.theoryId === "string" && ["orphaned-process", "human-maintained", "autonomous-operator"].includes(result.theoryId)
+    && (result.theoryAssessment === "best-supported" || result.theoryAssessment === "plausible-not-proven" || result.theoryAssessment === "not-established")
+    && (result.reasoningAssessment === "careful" || result.reasoningAssessment === "developing")
+    && Array.isArray(result.supportingEvidenceIds) && result.supportingEvidenceIds.every((id) => typeof id === "string")
+    && Array.isArray(result.counterEvidenceIds) && result.counterEvidenceIds.every((id) => typeof id === "string")
+    && Array.isArray(result.feedback) && result.feedback.every((line) => typeof line === "string")
+    && typeof result.conclusion === "string"
+    && result.endingId === "partial-reveal"
+    && typeof result.completedAt === "string";
 }
 
 function CuratorPanel({
@@ -187,11 +243,13 @@ function CuratorPanel({
       {isAsking && <p className="curator-loading" role="status"><span className="loading-mark" /> Reviewing archive evidence…</p>}
       {result && (
         <div className="curator-response" aria-live="polite">
+          {result.fallback && <p className="curator-fallback-note" role="status">LOCAL MODEL UNAVAILABLE / DIRECT RECORD EXCERPTS</p>}
           {askedQuestion && <p className="asked-question"><span>YOUR QUESTION</span>{askedQuestion}</p>}
           <p className="micro-label">CURATOR RESPONSE</p>
           <p className="curator-answer">{result.answer}</p>
           <div className="source-block">
-            <span className="source-heading">SUPPORTING RECORDS</span>
+              <span className="source-heading">CITED ARCHIVE RECORDS</span>
+              <p className="curator-source-note">The Curator can misread a record. Open each citation to verify what it supports.</p>
             {result.sources.length === 0 ? (
               <p className="no-sources">No archive records were retrieved for this question.</p>
             ) : (
@@ -237,6 +295,16 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   const [documentOpen, setDocumentOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(true);
+  const [gameProgress, setGameProgress] = useState<PersistedGameProgress | null>(null);
+  const [gameProgressReady, setGameProgressReady] = useState(false);
+  const [progressStorageError, setProgressStorageError] = useState("");
+  const [theoryId, setTheoryId] = useState<TheoryId>("orphaned-process");
+  const [supportingEvidenceIds, setSupportingEvidenceIds] = useState<string[]>([]);
+  const [counterEvidenceIds, setCounterEvidenceIds] = useState<string[]>([]);
+  const [unresolvedQuestion, setUnresolvedQuestion] = useState("");
+  const [theoryResult, setTheoryResult] = useState<TheoryResult | null>(null);
+  const [theoryError, setTheoryError] = useState("");
+  const [isSubmittingTheory, setIsSubmittingTheory] = useState(false);
   const theme = useSyncExternalStore(subscribeToTheme, getThemeSnapshot, getServerThemeSnapshot);
   const curatorRequestLock = useRef(false);
   const documentDialogRef = useRef<HTMLDialogElement>(null);
@@ -247,8 +315,8 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   const visibleRecords = useMemo(() => {
     if (searchResults) return searchResults;
     const activeSection = sections.find((item) => item.key === section);
-    return activeSection?.type
-      ? archive.filter(({ type }) => type === activeSection.type)
+    return activeSection?.types
+      ? archive.filter(({ type }) => activeSection.types?.includes(type))
       : archive;
   }, [archive, searchResults, section]);
 
@@ -256,6 +324,8 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   const savedRecords = archive.filter(({ id }) => savedIds.includes(id));
   const activeSectionLabel = sections.find(({ key }) => key === section)?.label ?? "Archived home";
 
+  // Client storage is an external persistence source; restore its snapshot after hydration.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const dialog = documentDialogRef.current;
     if (!dialog) return;
@@ -287,14 +357,93 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
     }
   }, [aboutOpen]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const archiveIds = archive.map(({ id }) => id);
+    const legacyEvidenceIds = getSavedIds(getNotebookSnapshot(), archive);
+    let restored: PersistedGameProgress | null = null;
+    let raw: string | null = null;
+
+    try {
+      raw = window.localStorage.getItem(GAME_PROGRESS_KEY);
+      restored = parseGameProgress(raw, archiveIds);
+      if (raw && !restored) {
+        setProgressStorageError("Saved investigation data was invalid. Your evidence notebook is still available.");
+        raw = null;
+      }
+    } catch {
+      setProgressStorageError("Browser storage is unavailable. Progress will remain only for this session.");
+    }
+
+    if (!restored) restored = createEmptyGameProgress(legacyEvidenceIds);
+    volatileNotebookSnapshot = JSON.stringify(restored.evidenceIds);
+    try {
+      window.localStorage.setItem(NOTEBOOK_KEY, volatileNotebookSnapshot);
+      if (!raw && !persistGameProgress(window.localStorage, restored)) {
+        setProgressStorageError("Investigation data could not be saved. Progress will remain only for this session.");
+      }
+    } catch {
+      setProgressStorageError("Browser storage is unavailable. Progress will remain only for this session.");
+    }
+    window.dispatchEvent(new Event(NOTEBOOK_EVENT));
+
+    setGameProgress(restored);
+    if (restored.submission) {
+      setTheoryId(restored.submission.theoryId);
+      setSupportingEvidenceIds(restored.submission.supportingEvidenceIds);
+      setCounterEvidenceIds(restored.submission.counterEvidenceIds);
+      setUnresolvedQuestion(restored.submission.unresolvedQuestion);
+    }
+    setGameProgressReady(true);
+
+    if (!restored.submission) return () => { cancelled = true; };
+
+    setIsSubmittingTheory(true);
+    void fetch("/api/theory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        ...restored.submission,
+        collectedEvidenceIds: [...new Set([
+          ...restored.evidenceIds,
+          ...restored.submission.supportingEvidenceIds,
+          ...restored.submission.counterEvidenceIds,
+        ])],
+      }),
+    })
+      .then(async (response) => {
+        const payload: unknown = await response.json();
+        if (!response.ok) throw new Error(getApiError(payload, "Saved theory could not be restored."));
+        if (typeof payload !== "object" || payload === null || !("evaluation" in payload) || !isTheoryResult(payload.evaluation)) {
+          throw new Error("The saved theory returned an unexpected evaluation.");
+        }
+        if (cancelled) return;
+        const completedAt = restored?.ending?.completedAt ?? payload.evaluation.completedAt;
+        const restoredEvaluation = { ...payload.evaluation, completedAt };
+        setTheoryResult(restoredEvaluation);
+        const completed = { ...restored!, ending: { id: restoredEvaluation.endingId, completedAt } };
+        setGameProgress(completed);
+        if (!saveProgress(completed)) setProgressStorageError("The conclusion was restored for this session, but browser storage could not be updated.");
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setTheoryError(error instanceof Error ? error.message : "Saved theory could not be restored.");
+      })
+      .finally(() => {
+        if (!cancelled) setIsSubmittingTheory(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [archive]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   function selectSection(nextSection: SectionKey) {
     setDocumentOpen(false);
     setSection(nextSection);
     setSearchResults(null);
     setSearchQuery("");
     setSearchError("");
-    const nextType = sections.find(({ key }) => key === nextSection)?.type;
-    const nextRecord = nextType ? archive.find(({ type }) => type === nextType) : archive[0];
+    const nextTypes = sections.find(({ key }) => key === nextSection)?.types;
+    const nextRecord = nextTypes ? archive.find(({ type }) => nextTypes.includes(type)) : archive[0];
     setActiveRecordId(nextRecord?.id ?? null);
   }
 
@@ -338,8 +487,8 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
     setSearchQuery("");
     setSearchResults(null);
     setSearchError("");
-    const nextType = sections.find(({ key }) => key === section)?.type;
-    const nextRecord = nextType ? archive.find(({ type }) => type === nextType) : archive[0];
+    const nextTypes = sections.find(({ key }) => key === section)?.types;
+    const nextRecord = nextTypes ? archive.find(({ type }) => nextTypes.includes(type)) : archive[0];
     setActiveRecordId(nextRecord?.id ?? null);
   }
 
@@ -372,7 +521,10 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
     const nextIds = savedIds.includes(recordId)
       ? savedIds.filter((id) => id !== recordId)
       : [...savedIds, recordId];
-    persistSavedIds(nextIds);
+    const nextProgress = { ...(gameProgress ?? createEmptyGameProgress()), evidenceIds: nextIds };
+    setGameProgress(nextProgress);
+    if (!saveProgress(nextProgress)) setProgressStorageError("Evidence changed in this session, but browser storage could not save it.");
+    else setProgressStorageError("");
   }
 
   function toggleTheme() {
@@ -425,6 +577,79 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
       curatorRequestLock.current = false;
       setIsAsking(false);
     }
+  }
+
+  async function submitTheory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTheoryError("");
+    if (isSubmittingTheory || !gameProgressReady) return;
+    if (supportingEvidenceIds.length < 2) {
+      setTheoryError("Choose at least two saved records that support your explanation.");
+      return;
+    }
+    if (counterEvidenceIds.length < 1) {
+      setTheoryError("Choose at least one saved record that complicates your explanation.");
+      return;
+    }
+    if ([...supportingEvidenceIds, ...counterEvidenceIds].some((id) => !savedIds.includes(id))) {
+      setTheoryError("Only records currently saved in your evidence notebook can be submitted.");
+      return;
+    }
+
+    const submission: TheorySubmission = {
+      theoryId,
+      supportingEvidenceIds,
+      counterEvidenceIds,
+      unresolvedQuestion: unresolvedQuestion.trim(),
+    };
+    setIsSubmittingTheory(true);
+    setTheoryResult(null);
+    try {
+      const response = await fetch("/api/theory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ ...submission, collectedEvidenceIds: savedIds }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) throw new Error(getApiError(payload, "The theory could not be evaluated."));
+      if (typeof payload !== "object" || payload === null || !("evaluation" in payload) || !isTheoryResult(payload.evaluation)) {
+        throw new Error("The investigation returned an unexpected evaluation.");
+      }
+
+      const result = payload.evaluation;
+      const completed: PersistedGameProgress = {
+        version: 1,
+        evidenceIds: savedIds,
+        submission,
+        ending: { id: result.endingId, completedAt: result.completedAt },
+      };
+      setTheoryResult(result);
+      setGameProgress(completed);
+      if (!saveProgress(completed)) setProgressStorageError("Your conclusion is available for this session, but browser storage could not save it.");
+    } catch (error) {
+      setTheoryError(error instanceof Error ? error.message : "The theory could not be evaluated.");
+    } finally {
+      setIsSubmittingTheory(false);
+    }
+  }
+
+  function toggleTheoryEvidence(recordId: string, role: "support" | "counter") {
+    if (role === "support") {
+      setSupportingEvidenceIds((current) => current.includes(recordId) ? current.filter((id) => id !== recordId) : [...current, recordId]);
+      setCounterEvidenceIds((current) => current.filter((id) => id !== recordId));
+    } else {
+      setCounterEvidenceIds((current) => current.includes(recordId) ? current.filter((id) => id !== recordId) : [...current, recordId]);
+      setSupportingEvidenceIds((current) => current.filter((id) => id !== recordId));
+    }
+  }
+
+  function reviseTheory() {
+    const nextProgress = { ...(gameProgress ?? createEmptyGameProgress(savedIds)), evidenceIds: savedIds, submission: null, ending: null };
+    setTheoryResult(null);
+    setTheoryError("");
+    setGameProgress(nextProgress);
+    if (!saveProgress(nextProgress)) setProgressStorageError("The previous conclusion remains cleared only for this session; browser storage could not be updated.");
+    else setProgressStorageError("");
   }
 
   return (
@@ -485,13 +710,13 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
 
         <div className="site-banner">
           <div className="site-wordmark"><span className="site-emblem">O</span><div><strong>OCTOBER<br />ONLINE</strong><small>community pages · est. 1998</small></div></div>
-          <div className="site-banner-note"><span>LOCAL RECOVERY COPY</span><strong>READ ONLY / 05 FILES</strong></div>
+          <div className="site-banner-note"><span>LOCAL RECOVERY COPY</span><strong>READ ONLY / {archive.length.toString().padStart(2, "0")} FILES</strong></div>
         </div>
 
         <div className="investigation-layout">
           <aside className="index-rail">
             <div className="rail-heading">
-              <span>DIRECTORY</span><span>05 FILES</span>
+              <span>DIRECTORY</span><span>{archive.length.toString().padStart(2, "0")} FILES</span>
               <button
                 className="directory-toggle"
                 type="button"
@@ -504,7 +729,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
             </div>
             <nav id="archive-section-nav" className="archive-nav" aria-label="Archive sections" hidden={!directoryOpen}>
               {sections.map((item, index) => {
-                const count = item.type ? archive.filter(({ type }) => type === item.type).length : archive.length;
+                const count = item.types ? archive.filter(({ type }) => item.types?.includes(type)).length : archive.length;
                 return (
                   <button
                     key={item.key}
@@ -615,7 +840,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
                   ))}
                 </ul>
               )}
-              <div className="notebook-footer"><span>LOCAL NOTEBOOK</span><span>{notebookReady ? "AUTOSAVED" : "LOADING"}</span></div>
+              <div className="notebook-footer"><span>LOCAL NOTEBOOK</span><span>{!notebookReady ? "RESTORING" : progressStorageError ? "SESSION ONLY" : "SAVED"}</span></div>
             </section>
 
             <CuratorPanel
@@ -630,7 +855,91 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
             />
           </aside>
         </div>
-        <footer className="browser-footer"><span>OCTOBER ONLINE ARCHIVE</span><span>RECONSTRUCTED FROM FIVE RECOVERED RECORDS</span><span>© 2009 / COPY PRESERVED</span></footer>
+        <footer className="browser-footer"><span>OCTOBER ONLINE ARCHIVE</span><span>RECONSTRUCTED FROM {archive.length} RECOVERED RECORDS</span><span>© 2009 / COPY PRESERVED</span></footer>
+      </section>
+      <section className="theory-panel" id="submit-theory" aria-labelledby="theory-title">
+        <header className="theory-panel-heading">
+          <div>
+            <p className="micro-label">INVESTIGATION / FINAL STAGE</p>
+            <h2 id="theory-title">Submit your theory</h2>
+          </div>
+          <span className="theory-stage-mark">{theoryResult ? "CASE REVIEWED" : "EVIDENCE-LED"}</span>
+        </header>
+
+        {progressStorageError && <p className="inline-error theory-storage-note" role="status">{progressStorageError}</p>}
+        {theoryError && <p className="inline-error" role="alert">{theoryError}</p>}
+
+        {isSubmittingTheory && gameProgress?.submission ? (
+          <p className="theory-loading" role="status"><span className="loading-mark" /> Restoring your completed investigation…</p>
+        ) : theoryResult ? (
+          <div className="theory-result" aria-live="polite">
+            <div className="theory-result-status">
+              <span className="micro-label">PARTIAL REVEAL / {theoryResult.endingId.toUpperCase()}</span>
+              <span className={`theory-assessment ${theoryResult.theoryAssessment}`}>{theoryResult.theoryAssessment.replaceAll("-", " ").toUpperCase()}</span>
+            </div>
+            <p className="theory-reasoning-label">YOUR THEORY: {theoryOptions.find((option) => option.id === theoryResult.theoryId)?.title.toUpperCase()}</p>
+            <p className="theory-reasoning-label">REASONING: {theoryResult.reasoningAssessment.toUpperCase()}</p>
+            <ul className="theory-feedback">
+              {theoryResult.feedback.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+            </ul>
+            <section className="theory-conclusion" aria-labelledby="conclusion-title">
+              <p className="micro-label">CANONICAL FINDING</p>
+              <h3 id="conclusion-title">The Process That Remained</h3>
+              <p>{theoryResult.conclusion}</p>
+              <p className="theory-open-question"><strong>Still unresolved:</strong> {gameProgress?.submission?.unresolvedQuestion || "Who, or what, originated the remaining anomalies?"}</p>
+            </section>
+            <div className="theory-cited-records">
+              <span className="source-heading">YOUR SUBMITTED EVIDENCE</span>
+              <div>
+                {[...new Set([...theoryResult.supportingEvidenceIds, ...theoryResult.counterEvidenceIds])].map((id) => {
+                  const record = archive.find((item) => item.id === id);
+                  return record ? <button type="button" key={id} onClick={() => openRecord(id)}><span>{id}</span> {record.title}</button> : null;
+                })}
+              </div>
+            </div>
+            <button className="theory-revise" type="button" onClick={reviseTheory}>REVISE THEORY</button>
+          </div>
+        ) : !gameProgressReady ? (
+          <p className="theory-loading" role="status"><span className="loading-mark" /> Restoring investigation progress…</p>
+        ) : (
+          <form className="theory-form" onSubmit={submitTheory}>
+            <fieldset className="theory-options">
+              <legend>Which explanation best fits the records?</legend>
+              {theoryOptions.map((option) => (
+                <label className={`theory-option${theoryId === option.id ? " is-selected" : ""}`} key={option.id}>
+                  <input type="radio" name="theory-id" value={option.id} checked={theoryId === option.id} onChange={() => setTheoryId(option.id)} />
+                  <span><strong>{option.title}</strong><small>{option.description}</small></span>
+                </label>
+              ))}
+            </fieldset>
+
+            <div className="theory-evidence-head">
+              <div><h3>Connect the evidence</h3><p>Save records in your notebook first, then mark how each record relates to your theory.</p></div>
+              <span>{savedIds.length.toString().padStart(2, "0")} / {archive.length.toString().padStart(2, "0")} COLLECTED</span>
+            </div>
+            {savedIds.length === 0 ? (
+              <p className="theory-no-evidence">Your notebook is empty. Open archive records and choose <strong>Save as Evidence</strong> to continue.</p>
+            ) : (
+              <div className="theory-evidence-list" role="group" aria-label="Classify saved evidence">
+                <div className="theory-evidence-columns" aria-hidden="true"><span>RECOVERED RECORD</span><span>SUPPORTS</span><span>COMPLICATES</span></div>
+                {archive.filter(({ id }) => savedIds.includes(id)).map((record) => (
+                  <div className="theory-evidence-row" key={record.id}>
+                    <button type="button" className="theory-evidence-open" onClick={() => openRecord(record.id)}><span>{record.id}</span><strong>{record.title}</strong></button>
+                    <label><span className="visually-hidden">{record.id} supports the theory</span><input type="checkbox" checked={supportingEvidenceIds.includes(record.id)} onChange={() => toggleTheoryEvidence(record.id, "support")} /></label>
+                    <label><span className="visually-hidden">{record.id} complicates the theory</span><input type="checkbox" checked={counterEvidenceIds.includes(record.id)} onChange={() => toggleTheoryEvidence(record.id, "counter")} /></label>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <label className="theory-unresolved-label" htmlFor="unresolved-question">WHAT REMAINS UNEXPLAINED? <span>OPTIONAL</span></label>
+            <textarea id="unresolved-question" maxLength={300} value={unresolvedQuestion} onChange={(event) => setUnresolvedQuestion(event.target.value)} placeholder="Which clue still has more than one possible explanation?" />
+            <div className="theory-form-footer">
+              <p>Choose at least two supporting records and one that complicates your theory. The evaluation considers evidence and uncertainty, not just your selected explanation.</p>
+              <button type="submit" disabled={isSubmittingTheory || !gameProgressReady}>{isSubmittingTheory ? "REVIEWING EVIDENCE…" : "SUBMIT THEORY →"}</button>
+            </div>
+          </form>
+        )}
       </section>
       {activeRecord && (
         <dialog
@@ -675,7 +984,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
                   type="button"
                   className={`collect-button${savedIds.includes(activeRecord.id) ? " is-saved" : ""}`}
                   onClick={() => toggleEvidence(activeRecord.id)}
-                  disabled={!notebookReady}
+                  disabled={!notebookReady || !gameProgressReady}
                   aria-pressed={savedIds.includes(activeRecord.id)}
                 >
                   <span aria-hidden="true">{savedIds.includes(activeRecord.id) ? "✓" : "+"}</span>
@@ -704,12 +1013,12 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
             <p className="about-intro">“Some websites disappear. Some records survive. Not every surviving record tells the truth.”</p>
             <p>You are investigating the October 16 Incident through fragments recovered from October Online. Connect evidence, examine contradictions, and build a theory supported by the surviving records.</p>
             <ol className="guide-steps">
-              <li><span>01</span><div><h3>Explore the archive</h3><p>Browse archived pages, forum posts, guestbook entries, user profiles, and server logs. Search by title, date, author, or a relevant term.</p></div></li>
+              <li><span>01</span><div><h3>Explore the archive</h3><p>Browse archived pages, forum captures, guestbook entries, profiles, metadata reports, server logs, and system traces. Search by title, date, author, type, ID, or tag.</p></div></li>
               <li><span>02</span><div><h3>Inspect suspicious records</h3><p>Open a record to examine its content, metadata, dates, author, and reliability where available. Look for unexpected activity and discrepancies.</p></div></li>
               <li><span>03</span><div><h3>Collect evidence</h3><p>Use <strong>Save as Evidence</strong> in a record to add it to your notebook. Keep its archive ID so you can revisit and compare the source.</p></div></li>
               <li><span>04</span><div><h3>Connect the clues</h3><p>Compare records instead of reading each alone. A forum post may describe activity while a server log records a request; neither fact explains the whole incident by itself.</p></div></li>
               <li><span>05</span><div><h3>Question The Curator</h3><p>Ask specific questions about records and contradictions. Its local-model responses cite retrieved records, but check each claim against those sources.</p></div></li>
-              <li><span>06</span><div><h3>Form your theory</h3><p>Explain what you think happened on October 16, 2009. Prefer multiple independent records, and separate what the archive establishes from what you infer.</p></div></li>
+              <li><span>06</span><div><h3>Form your theory</h3><p>Use the Submit your theory panel below the archive to choose an explanation, connect supporting and complicating records, and identify what remains unknown.</p></div></li>
             </ol>
             <section className="investigation-rules" aria-labelledby="rules-title">
               <h3 id="rules-title">Keep in mind</h3>

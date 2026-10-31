@@ -2,31 +2,31 @@
   {
     "id": "ARC-001",
     "title": "Final Shutdown Notice",
-    "type": "announcement",
+    "type": "homepage",
     "date": "2009-10-12",
     "author": "site_admin",
-    "content": "After several years online, the owners announce that the website will shut down at the end of October 12. They thank the community and say the public pages will no longer be updated.",
-    "tags": ["shutdown", "announcement", "website"],
+    "content": "October Online will cease public operation effective October 12, 2009.\n\nThank you to everyone who contributed to the forums, guestbook, and community pages over the years.\n\nPublic posting will no longer be available after closure. Existing backups may remain in circulation, but we cannot guarantee their completeness or accuracy.\n\n— Site Administration",
+    "tags": ["shutdown", "official", "homepage"],
     "reliability": "high"
   },
   {
     "id": "ARC-002",
     "title": "The Last Forum Post",
-    "type": "forum_post",
+    "type": "forum",
     "date": "2009-10-15",
     "author": "night_owl",
-    "content": "I thought this place was already closed, but a fresh reply counter appeared beside thread 17 tonight. Did anyone else see activity after the shutdown notice?",
-    "tags": ["forum", "night_owl", "thread-17", "activity"],
+    "content": "I checked this thread again tonight.\n\nThe reply counter says there is a new response, but I cannot find anything after my last post.\n\nMaybe the mirror is counting something that the original forum no longer has. If anyone else can see it, tell me which copy you're using.\n\n— night_owl",
+    "tags": ["forum", "reply-counter", "post-shutdown"],
     "reliability": "medium"
   },
   {
     "id": "ARC-003",
     "title": "The Strange Guestbook Entry",
-    "type": "guestbook_entry",
+    "type": "guestbook",
     "date": "2009-10-16",
-    "author": "anonymous",
-    "content": "You were looking at the wrong copy. Stop trusting the dates.",
-    "tags": ["guestbook", "anonymous", "copy", "dates"],
+    "author": "unknown",
+    "content": "You were looking at the wrong copy.\n\nStop trusting the dates.\n\nIf this message appears twice, do not assume the second one was written later.",
+    "tags": ["guestbook", "wrong-copy", "warning"],
     "reliability": "low"
   },
   {
@@ -35,18 +35,58 @@
     "type": "server_log",
     "date": "2009-10-15",
     "author": "archive_monitor",
-    "content": "Request for /mirror/forum/thread-17.html returned status 200 from host mirror-02.",
-    "tags": ["mirror", "server-log", "thread-17", "status-200"],
+    "content": "2009-10-15 23:41:08 — GET /mirror/forum/thread-17.html\n\nHost: mirror-02\nResponse: 200 OK\nPayload: archived forum page\nRequest origin: unavailable\nUser identity: unavailable\n\nNote: A successful response confirms that the requested resource was served. It does not establish who initiated the request or when the underlying page was created.",
+    "tags": ["mirror-02", "http", "server-log"],
     "reliability": "high"
   },
   {
     "id": "ARC-005",
     "title": "A Forgotten User Profile",
-    "type": "user_profile",
+    "type": "profile",
     "date": "2009-10-10",
     "author": "night_owl",
-    "content": "Profile note: I keep local copies of websites I care about, in case a page disappears before anyone has saved it.",
-    "tags": ["night_owl", "profile", "copies", "preservation"],
+    "content": "I keep local copies of sites that look like they might disappear.\n\nMost people think a backup is just a collection of files. They forget that pages can contain old counters, queued messages, broken links, and data that no longer makes sense without the original server.\n\nSometimes a copy looks more alive than the place it came from.",
+    "tags": ["profile", "backups", "night-owl"],
     "reliability": "medium"
+  },
+  {
+    "id": "ARC-006",
+    "title": "The Orphaned Cron Job",
+    "type": "server_log",
+    "date": "2009-10-17",
+    "author": "archive_monitor",
+    "content": "Maintenance audit — mirror-02\n\nTask: KEEPALIVE\nSchedule: periodic\nOwner account: disabled\nTask status: present\nTask removal: not recorded\n\nDescription recovered from configuration:\n\n“Refresh cached pages and process pending forum maintenance data.”\n\nAudit note: The task's continued presence establishes that the maintenance configuration survived. The available logs do not establish which outputs it produced or whether it executed successfully after shutdown.",
+    "tags": ["keepalive", "cron", "maintenance", "orphaned-process"],
+    "reliability": "high"
+  },
+  {
+    "id": "ARC-007",
+    "title": "Two Clocks, One Post",
+    "type": "metadata_report",
+    "date": "2009-10-18",
+    "author": "archive_monitor",
+    "content": "Record comparison — thread-17\n\nOriginal record timestamp: 2009-10-11 21:14:32\nMirror export timestamp: 2009-10-15 23:41:08\nExport action: recorded\nOriginal modification history: incomplete\n\nThe two timestamps refer to different operations. The export time cannot be used as proof that the original forum post was created or edited at that time.\n\nMissing source metadata prevents a complete reconstruction.",
+    "tags": ["timestamps", "metadata", "mirror-export"],
+    "reliability": "high"
+  },
+  {
+    "id": "ARC-008",
+    "title": "The Reply Nobody Wrote",
+    "type": "forum_capture",
+    "date": "2009-10-19",
+    "author": "archive_monitor",
+    "content": "Recovered thread fragment — thread-17\n\nReply reference: R-18\nDisplayed author: disabled account\nReply body: unavailable\nParent post reference: not found\nMatching original database record: not recovered\n\nThe reply reference exists in the recovered fragment, but the original record and its creation history are missing.\n\nPossible explanations include incomplete backup data, an export inconsistency, automated processing, or an action that was not captured by the surviving logs.",
+    "tags": ["missing-record", "disabled-account", "forum"],
+    "reliability": "medium"
+  },
+  {
+    "id": "ARC-009",
+    "title": "A Query for the Investigator",
+    "type": "system_trace",
+    "date": "2009-10-20",
+    "author": "unknown",
+    "content": "Recovered trace fragment\n\nOperation: QUERY\nQuery token: “wrong copy”\nOriginating process: unavailable\nRequesting identity: unavailable\nTrace integrity: unverified\n\nThe token matches language present in a recovered guestbook entry.\n\nNo surviving record establishes whether the query was generated by a person, an automated process, or a separate archival operation.",
+    "tags": ["system-trace", "wrong-copy", "unknown-origin"],
+    "reliability": "low"
   }
 ]

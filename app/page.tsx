@@ -1,7 +1,8 @@
 import archiveData from "@/data/archive.json";
 import InvestigationInterface from "./investigation-interface";
-import type { ArchiveRecord } from "@/lib/retrieval";
+import { validateArchive } from "@/lib/archive";
 
 export default function Home() {
-  return <InvestigationInterface archive={archiveData as ArchiveRecord[]} />;
+  if (!validateArchive(archiveData)) throw new Error("The recovered archive is invalid.");
+  return <InvestigationInterface archive={archiveData} />;
 }

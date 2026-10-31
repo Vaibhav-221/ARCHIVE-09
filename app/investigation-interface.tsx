@@ -244,7 +244,7 @@ function CuratorPanel({
       {isAsking && <p className="curator-loading" role="status"><span className="loading-mark" /> Reviewing archive evidence…</p>}
       {result && (
         <div className="curator-response" aria-live="polite">
-          {result.fallback && <p className="curator-fallback-note" role="status">LOCAL MODEL UNAVAILABLE / DIRECT RECORD EXCERPTS</p>}
+          {result.fallback && <p className="curator-fallback-note" role="status">LOCAL MODEL UNAVAILABLE / DIRECT ARCHIVE EXPLANATION</p>}
           {askedQuestion && <p className="asked-question"><span>YOUR QUESTION</span>{askedQuestion}</p>}
           <p className="micro-label">CURATOR RESPONSE</p>
           <p className="curator-answer">{result.answer}</p>

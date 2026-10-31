@@ -287,3 +287,84 @@ test("interface keeps canonical finding strictly separated from player-authored 
   assert.match(hypothesisSectionMatch[1], /PLAYER-AUTHORED HYPOTHESIS/);
   assert(hypothesisSectionMatch[1].includes("unresolvedQuestion"));
 });
+
+
+test("Curator prioritizes specific record question for two clocks one post and provides grounded fallback without generic-word noise", async (t) => {
+  const previousFetch = global.fetch;
+  t.after(() => { global.fetch = previousFetch; });
+  global.fetch = async () => { throw new TypeError("fetch failed"); };
+
+  const response = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", {
+    question: "what is the two clocks one post.",
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+
+  assert.equal(body.fallback, true);
+  // Prioritizes ARC-007 and excludes spurious matches like ARC-002 or ARC-003 that only matched "post" or "one"
+  assert.equal(body.sources.length, 1);
+  assert.equal(body.sources[0].id, "ARC-007");
+  assert.equal(body.sources.some((s) => s.id === "ARC-002"), false);
+  assert.equal(body.sources.some((s) => s.id === "ARC-003"), false);
+
+  // Distinguishes direct archive-based explanation from AI-generated response
+  assert.match(body.answer, /direct archive-based explanation/i);
+  assert.match(body.answer, /local (ai )?model is unavailable/i);
+
+  // Explains original timestamp vs export timestamp and that they refer to different operations
+  assert.match(body.answer, /2009-10-11 21:14:32/);
+  assert.match(body.answer, /2009-10-15 23:41:08/);
+  assert.match(body.answer, /different operations/i);
+  assert.match(body.answer, /does not prove when the original post was written or edited/i);
+
+  // Distinguishes facts from unknowns; does not claim timestamps prove who operated mirror
+  assert.match(body.answer, /does not establish who operated the mirror/i);
+});
+
+test("Curator resolves specific record questions by ID and title", async (t) => {
+  const previousFetch = global.fetch;
+  t.after(() => { global.fetch = previousFetch; });
+  global.fetch = async () => { throw new TypeError("connection refused"); };
+
+  // By ID
+  const idQuery = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question: "what is ARC-007?" }));
+  const idBody = await idQuery.json();
+  assert.equal(idQuery.status, 200);
+  assert.equal(idBody.fallback, true);
+  assert.deepEqual(idBody.sources.map((s) => s.id), ["ARC-007"]);
+  assert.match(idBody.answer, /2009-10-11 21:14:32/);
+
+  // By Title (ARC-006)
+  const cronQuery = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question: "what is the orphaned cron job?" }));
+  const cronBody = await cronQuery.json();
+  assert.equal(cronQuery.status, 200);
+  assert.equal(cronBody.fallback, true);
+  assert.deepEqual(cronBody.sources.map((s) => s.id), ["ARC-006"]);
+  assert.match(cronBody.answer, /KEEPALIVE/);
+  assert.match(cronBody.answer, /owner account/i);
+});
+
+test("Curator gracefully falls back on model timeout and server error responses", async (t) => {
+  const previousFetch = global.fetch;
+  t.after(() => { global.fetch = previousFetch; });
+
+  // Timeout error
+  global.fetch = async () => {
+    const error = new Error("The operation was aborted due to timeout");
+    error.name = "TimeoutError";
+    throw error;
+  };
+  const timeoutRes = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question: "what is the two clocks one post." }));
+  assert.equal(timeoutRes.status, 200);
+  const timeoutBody = await timeoutRes.json();
+  assert.equal(timeoutBody.fallback, true);
+  assert.equal(timeoutBody.sources[0].id, "ARC-007");
+
+  // HTTP 500 error from Ollama
+  global.fetch = async () => new Response("Internal Server Error", { status: 500 });
+  const errRes = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question: "what is the two clocks one post." }));
+  assert.equal(errRes.status, 200);
+  const errBody = await errRes.json();
+  assert.equal(errBody.fallback, true);
+  assert.equal(errBody.sources[0].id, "ARC-007");
+});

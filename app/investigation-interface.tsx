@@ -48,6 +48,9 @@ interface CuratorPanelProps {
 
 const NOTEBOOK_KEY = "archive-09:evidence-ids";
 const NOTEBOOK_EVENT = "archive-09:notebook-change";
+const THEME_KEY = "archive-09:theme";
+const THEME_EVENT = "archive-09:theme-change";
+type Theme = "dark" | "light";
 const SERVER_NOTEBOOK_SNAPSHOT = "__archive_notebook_server__";
 const MAX_QUESTION_LENGTH = 1_000;
 let volatileNotebookSnapshot = "[]";
@@ -81,6 +84,28 @@ function subscribeToNotebook(onStoreChange: () => void) {
     window.removeEventListener("storage", onStoreChange);
     window.removeEventListener(NOTEBOOK_EVENT, onStoreChange);
   };
+}
+
+function subscribeToTheme(onStoreChange: () => void) {
+  function handleStorage(event: StorageEvent) {
+    if (event.key !== THEME_KEY && event.key !== null) return;
+    document.documentElement.dataset.theme = event.newValue === "light" ? "light" : "dark";
+    onStoreChange();
+  }
+  window.addEventListener("storage", handleStorage);
+  window.addEventListener(THEME_EVENT, onStoreChange);
+  return () => {
+    window.removeEventListener("storage", handleStorage);
+    window.removeEventListener(THEME_EVENT, onStoreChange);
+  };
+}
+
+function getThemeSnapshot(): Theme {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function getServerThemeSnapshot(): Theme {
+  return "dark";
 }
 
 function getNotebookSnapshot(): string {
@@ -212,6 +237,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   const [documentOpen, setDocumentOpen] = useState(false);
   const [floatingCuratorOpen, setFloatingCuratorOpen] = useState(false);
   const [atmosphereEnabled, setAtmosphereEnabled] = useState(true);
+  const theme = useSyncExternalStore(subscribeToTheme, getThemeSnapshot, getServerThemeSnapshot);
   const curatorRequestLock = useRef(false);
   const documentDialogRef = useRef<HTMLDialogElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -346,6 +372,17 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
     persistSavedIds(nextIds);
   }
 
+  function toggleTheme() {
+    const nextTheme: Theme = theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = nextTheme;
+    try {
+      window.localStorage.setItem(THEME_KEY, nextTheme);
+    } catch {
+      // The selected theme remains active for this page view if storage is unavailable.
+    }
+    window.dispatchEvent(new Event(THEME_EVENT));
+  }
+
   async function askCurator(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const prompt = question.trim();
@@ -396,6 +433,16 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
           <p className="masthead-subtitle">The Internet That Forgot You</p>
         </div>
         <div className="archive-status"><span className="status-light" /> RECOVERED COLLECTION <span className="status-divider">/</span> READ ONLY</div>
+        <button
+          className="theme-toggle"
+          type="button"
+          onClick={toggleTheme}
+          aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          aria-pressed={theme === "dark"}
+        >
+          <span aria-hidden="true">{theme === "dark" ? "☼" : "◐"}</span>
+          {theme === "dark" ? "LIGHT MODE" : "DARK MODE"}
+        </button>
       </header>
 
       <section className="incident-brief" aria-labelledby="incident-title">

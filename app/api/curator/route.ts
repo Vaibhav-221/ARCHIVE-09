@@ -80,7 +80,7 @@ const RECORD_EXPLANATIONS: Record<string, RecordExplanation> = {
     id: "ARC-007",
     title: "Two Clocks, One Post",
     date: "2009-10-18",
-    distinctiveTerms: ["two clocks one post", "two clocks", "original record timestamp", "mirror export timestamp", "export timestamp"],
+    distinctiveTerms: ["two clocks one post", "two clock one post", "two clocks", "original record timestamp", "mirror export timestamp", "export timestamp"],
     explanation:
       "In ARC-007 (Two Clocks, One Post), the metadata report compares timestamps for thread-17: the original record timestamp is 2009-10-11 21:14:32, while the mirror export timestamp is 2009-10-15 23:41:08 [ARC-007]. These two timestamps refer to different operations: the export timestamp documents when the archive copy was exported from the server, but the export timestamp does not prove when the original post was written or edited [ARC-007]. Missing source metadata leaves the original modification history incomplete, and the record does not establish who operated the mirror [ARC-007].",
   },
@@ -113,6 +113,10 @@ function normalizeQuery(value: string): string {
     .replace(/[’‘]/g, "'")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
+}
+
+function asksForMessageText(question: string): boolean {
+  return /\b(?:message|quote|text|words)\b/.test(normalizeQuery(question));
 }
 
 function findTargetedRecordIds(question: string): string[] {
@@ -161,11 +165,45 @@ function selectMaterialRecords(question: string, rawRecords: ReturnType<typeof s
   const targetedIds = findTargetedRecordIds(question);
   if (targetedIds.length > 0) {
     const matched = rawRecords.filter((record) => targetedIds.includes(record.id));
-    if (matched.length > 0) return matched;
+    if (matched.length > 0) {
+      if (targetedIds.includes("ARC-007") && asksForMessageText(question)) {
+        const relatedGuestbook = searchArchive("ARC-003", 1);
+        return [...matched, ...relatedGuestbook.filter(({ id }) => !matched.some((record) => record.id === id))];
+      }
+      return matched;
+    }
     const directLookup = searchArchive(targetedIds[0], 1);
-    if (directLookup.length > 0) return directLookup;
+    if (directLookup.length > 0) {
+      if (targetedIds.includes("ARC-007") && asksForMessageText(question)) {
+        const relatedGuestbook = searchArchive("ARC-003", 1);
+        return [...directLookup, ...relatedGuestbook.filter(({ id }) => !directLookup.some((record) => record.id === id))];
+      }
+      return directLookup;
+    }
   }
   return rawRecords.slice(0, 3);
+}
+
+function createDirectArc007Response(records: ReturnType<typeof searchArchive>, question: string): Response | null {
+  const record = records.find(({ id }) => id === "ARC-007");
+  if (!record) return null;
+
+  const sources = [record];
+  let answer = RECORD_EXPLANATIONS["ARC-007"].explanation;
+  if (asksForMessageText(question)) {
+    const guestbook = records.find(({ id }) => id === "ARC-003");
+    if (!guestbook) return null;
+
+    sources.push(guestbook);
+    const exactMessage = guestbook.content.replace(/\s+/g, " ").trim();
+    answer = `ARC-007 (“Two Clocks, One Post”) is a metadata report, not a message transcript [ARC-007]. Its original record timestamp is 2009-10-11 21:14:32, while its mirror export timestamp is 2009-10-15 23:41:08; these describe different operations [ARC-007]. The export timestamp does not prove when the original post was written or edited, and the incomplete metadata does not identify the mirror's operator [ARC-007]. ARC-007 contains no post message text, so the exact recovered guestbook message is from the separate record ARC-003: “${exactMessage}” [ARC-003].`;
+  }
+
+  return Response.json({
+    answer,
+    sources: sources.map(({ id, title, date }) => ({ id, title, date })),
+    direct: true,
+  });
 }
 
 function createGroundedFallback(records: ReturnType<typeof searchArchive>, question: string): {
@@ -236,6 +274,11 @@ export async function POST(request: Request) {
 
   const records = selectMaterialRecords(question.trim(), rawRecords);
 
+  if (findTargetedRecordIds(question.trim()).includes("ARC-007")) {
+    const directResponse = createDirectArc007Response(records, question.trim());
+    if (directResponse) return directResponse;
+  }
+
   const evidence = records.map(({ id, title, type, date, author, content, tags, reliability }) => ({
     id, title, type, date, author, content, tags, reliability,
   }));
@@ -281,12 +324,17 @@ export async function POST(request: Request) {
   ) return fallbackResponse(records, question);
 
   const includedRecords = new Map(records.map((record) => [record.id, record]));
+  const answer = data.message.content.trim().slice(0, MAX_MODEL_OUTPUT);
+  const archiveReferences = [...answer.matchAll(/\[([^\]]*ARC[^\]]*)\]/gi)];
+  if (archiveReferences.some(([, id]) => !/^ARC-\d{3}$/.test(id) || !includedRecords.has(id))) {
+    return Response.json(
+      { error: "The Curator could not connect its answer to a specific archive record. Try a narrower question." },
+      { status: 502 }
+    );
+  }
+
   const citedIds = new Set<string>();
-  const answer = data.message.content.trim().slice(0, MAX_MODEL_OUTPUT).replace(/\[(ARC-\d{3})\]/g, (citation, id: string) => {
-    if (!includedRecords.has(id)) return "";
-    citedIds.add(id);
-    return citation;
-  });
+  for (const [, id] of archiveReferences) citedIds.add(id);
 
   if (citedIds.size === 0) {
     return Response.json(

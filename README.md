@@ -56,6 +56,7 @@ flowchart LR
 - **Deterministic Full-Text Search:** Unicode-normalized (`NFKC`) search with punctuation stripping, token weighting, and exact/partial matching across title, content, author, type, date, and index tags.
 - **Client-Side Progress & Storage Sync:** Local persistence with `localStorage` across tabs via custom window events, resilient session fallback when storage is restricted, and versioned schema parsing.
 - **AI Curator with Prompt Isolation:** Local Ollama integration (`qwen2.5-coder:3b`) protected by strict prompt isolation against jailbreaks and untrusted text injection, mandatory citation extraction, and deterministic offline fallback.
+- **Deterministic Record Answers:** Specific questions about ARC-007 use its verified metadata explanation; requests for its exact message identify ARC-003 as the separate source and never attribute that guestbook text to ARC-007.
 - **Deterministic Evaluation Engine:** Server-side theory validation separating player role selections from evidential strength, preventing false reports of missing complicating evidence, and keeping canonical conclusions strictly segregated from player hypotheses.
 
 ---

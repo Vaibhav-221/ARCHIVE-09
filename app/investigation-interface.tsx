@@ -43,6 +43,7 @@ interface CuratorResponse {
   answer: string;
   sources: CuratorSource[];
   fallback?: boolean;
+  direct?: boolean;
 }
 
 interface TheoryResult {
@@ -245,6 +246,7 @@ function CuratorPanel({
       {result && (
         <div className="curator-response" aria-live="polite">
           {result.fallback && <p className="curator-fallback-note" role="status">LOCAL MODEL UNAVAILABLE / DIRECT ARCHIVE EXPLANATION</p>}
+          {result.direct && <p className="curator-fallback-note" role="status">SPECIFIC RECORD QUERY / DIRECT ARCHIVE EXPLANATION</p>}
           {askedQuestion && <p className="asked-question"><span>YOUR QUESTION</span>{askedQuestion}</p>}
           <p className="micro-label">CURATOR RESPONSE</p>
           <p className="curator-answer">{result.answer}</p>

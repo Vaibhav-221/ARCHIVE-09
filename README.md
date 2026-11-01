@@ -55,8 +55,8 @@ flowchart LR
 - **Retro Archive Terminal UI:** Designed with late-2000s browser aesthetics, including window chrome, mock navigation bars, reliability badges, and theme switching (Light Mode / Dark Mode).
 - **Deterministic Full-Text Search:** Unicode-normalized (`NFKC`) search with punctuation stripping, token weighting, and exact/partial matching across title, content, author, type, date, and index tags.
 - **Client-Side Progress & Storage Sync:** Local persistence with `localStorage` across tabs via custom window events, resilient session fallback when storage is restricted, and versioned schema parsing.
-- **AI Curator with Prompt Isolation:** Local Ollama integration (`qwen2.5-coder:3b`) protected by strict prompt isolation against jailbreaks and untrusted text injection, mandatory citation extraction, and deterministic offline fallback.
-- **Deterministic Record Answers:** Specific questions about ARC-007 use its verified metadata explanation; requests for its exact message identify ARC-003 as the separate source and never attribute that guestbook text to ARC-007.
+- **AI Curator with Prompt Isolation:** Local Ollama integration (`qwen2.5-coder:3b`) protected by strict prompt isolation against jailbreaks and untrusted text injection. Model answers are shown only when citations match records in the evidence bundle; unavailable, timed-out, uncited, or invalid-citation responses use a deterministic archive-grounded fallback.
+- **Deterministic Curator Answers:** Specific questions about ARC-007 use its verified metadata explanation; requests for its exact message identify ARC-003 as the separate source. Operator-identity questions and broad post-shutdown activity questions use concise, cited archive syntheses that preserve the evidence limits.
 - **Deterministic Evaluation Engine:** Server-side theory validation separating player role selections from evidential strength, preventing false reports of missing complicating evidence, and keeping canonical conclusions strictly segregated from player hypotheses.
 
 ---

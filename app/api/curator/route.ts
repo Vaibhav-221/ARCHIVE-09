@@ -119,6 +119,24 @@ function asksForMessageText(question: string): boolean {
   return /\b(?:message|quote|text|words)\b/.test(normalizeQuery(question));
 }
 
+function asksWhoOperatedMirror(question: string): boolean {
+  const normalized = normalizeQuery(question);
+  return /\bwho\b/.test(normalized)
+    && /\b(?:operat|maintain|run)\w*\b/.test(normalized)
+    && /\bmirror\b/.test(normalized);
+}
+
+function asksAboutPostShutdownActivity(question: string): boolean {
+  const normalized = normalizeQuery(question);
+  return /\bactivity\b/.test(normalized)
+    && /\bshutdown\b/.test(normalized)
+    && /\b(?:evidence|suggest|continued|continue)\w*\b/.test(normalized);
+}
+
+function getRecordsById(ids: string[]): ReturnType<typeof searchArchive> {
+  return ids.flatMap((id) => searchArchive(id, 1));
+}
+
 function findTargetedRecordIds(question: string): string[] {
   const normalized = normalizeQuery(question);
   const targeted: string[] = [];
@@ -206,6 +224,28 @@ function createDirectArc007Response(records: ReturnType<typeof searchArchive>, q
   });
 }
 
+function createDirectOperatorResponse(records: ReturnType<typeof searchArchive>): Response | null {
+  const includedIds = new Set(records.map(({ id }) => id));
+  if (!["ARC-004", "ARC-006", "ARC-008"].every((id) => includedIds.has(id))) return null;
+
+  return Response.json({
+    answer: "The recovered archive does not establish who operated mirror-02 [ARC-004] [ARC-006] [ARC-008]. ARC-004 records a successful request but leaves its origin and user identity unavailable [ARC-004]. ARC-006 shows that the KEEPALIVE maintenance configuration remained present, but does not identify an operator, establish successful execution after shutdown, or link the task to specific anomalies [ARC-006]. ARC-008 documents a reply pointer without its body or matching original database record; that is an unresolved anomaly, not evidence of a specific operator [ARC-008].",
+    sources: records.map(({ id, title, date }) => ({ id, title, date })),
+    direct: true,
+  });
+}
+
+function createDirectActivityResponse(records: ReturnType<typeof searchArchive>): Response | null {
+  const includedIds = new Set(records.map(({ id }) => id));
+  if (!["ARC-001", "ARC-004", "ARC-006"].every((id) => includedIds.has(id))) return null;
+
+  return Response.json({
+    answer: "ARC-001 records that public operations ended effective October 12, 2009 [ARC-001]. ARC-004 logs mirror-02 successfully serving thread-17 on October 15, and ARC-006 records that the KEEPALIVE maintenance configuration was still present on October 17 [ARC-004] [ARC-006]. Together, these records suggest the mirror remained accessible and retained maintenance configuration after shutdown; they do not prove the task ran successfully, identify who initiated the request, or show that the task caused every later anomaly [ARC-004] [ARC-006].",
+    sources: records.map(({ id, title, date }) => ({ id, title, date })),
+    direct: true,
+  });
+}
+
 function createGroundedFallback(records: ReturnType<typeof searchArchive>, question: string): {
   answer: string;
   sources: { id: string; title: string; date: string }[];
@@ -274,6 +314,16 @@ export async function POST(request: Request) {
 
   const records = selectMaterialRecords(question.trim(), rawRecords);
 
+  if (asksWhoOperatedMirror(question.trim())) {
+    const directResponse = createDirectOperatorResponse(getRecordsById(["ARC-004", "ARC-006", "ARC-008"]));
+    if (directResponse) return directResponse;
+  }
+
+  if (asksAboutPostShutdownActivity(question.trim())) {
+    const directResponse = createDirectActivityResponse(getRecordsById(["ARC-001", "ARC-004", "ARC-006"]));
+    if (directResponse) return directResponse;
+  }
+
   if (findTargetedRecordIds(question.trim()).includes("ARC-007")) {
     const directResponse = createDirectArc007Response(records, question.trim());
     if (directResponse) return directResponse;
@@ -327,20 +377,14 @@ export async function POST(request: Request) {
   const answer = data.message.content.trim().slice(0, MAX_MODEL_OUTPUT);
   const archiveReferences = [...answer.matchAll(/\[([^\]]*ARC[^\]]*)\]/gi)];
   if (archiveReferences.some(([, id]) => !/^ARC-\d{3}$/.test(id) || !includedRecords.has(id))) {
-    return Response.json(
-      { error: "The Curator could not connect its answer to a specific archive record. Try a narrower question." },
-      { status: 502 }
-    );
+    return fallbackResponse(records, question);
   }
 
   const citedIds = new Set<string>();
   for (const [, id] of archiveReferences) citedIds.add(id);
 
   if (citedIds.size === 0) {
-    return Response.json(
-      { error: "The Curator could not connect its answer to a specific archive record. Try a narrower question." },
-      { status: 502 }
-    );
+    return fallbackResponse(records, question);
   }
 
   const sources = [...citedIds].map((id) => {

@@ -91,13 +91,17 @@ test("Curator isolates archive text as evidence and cites only included IDs", as
   assert.deepEqual(body.sources.map((source) => source.id), ["ARC-006"]);
 });
 
-test("Curator refuses an uncited model answer and provides a direct excerpt when Ollama is unavailable", async (t) => {
+test("Curator uses a grounded fallback for uncited model answers and Ollama outages", async (t) => {
   const previousFetch = global.fetch;
   t.after(() => { global.fetch = previousFetch; });
   global.fetch = async () => Response.json({ message: { content: "A guess without an archive citation." } });
   const uncited = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question: "orphaned cron keepalive" }));
-  assert.equal(uncited.status, 502);
-  assert.match((await uncited.json()).error, /specific archive record/i);
+  const uncitedFallback = await uncited.json();
+  assert.equal(uncited.status, 200);
+  assert.equal(uncitedFallback.fallback, true);
+  assert.match(uncitedFallback.answer, /KEEPALIVE/);
+  assert.equal(uncitedFallback.answer.includes("A guess without an archive citation."), false);
+  assert.deepEqual(uncitedFallback.sources.map(({ id }) => id), ["ARC-006"]);
 
   global.fetch = async () => { throw new TypeError("connection refused"); };
   const offline = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question: "mirror server request" }));
@@ -346,6 +350,61 @@ test("Curator answers the exact Two Clocks question from ARC-007 and identifies 
   assert.equal(/invented message attributed to ARC-007/i.test(body.answer), false);
 });
 
+test("Curator answers mirror-operator questions with grounded uncertainty from ARC-004, ARC-006, and ARC-008", async (t) => {
+  const previousFetch = global.fetch;
+  t.after(() => { global.fetch = previousFetch; });
+  let modelCalled = false;
+  global.fetch = async () => {
+    modelCalled = true;
+    return Response.json({ message: { content: "A human operated the mirror [ARC-004]." } });
+  };
+
+  const response = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", {
+    question: "Who operated the mirror?",
+  }));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(modelCalled, false);
+  assert.equal(body.direct, true);
+  assert.match(body.answer, /does not establish who operated mirror-02/i);
+  assert.match(body.answer, /successful request but leaves its origin and user identity unavailable/i);
+  assert.match(body.answer, /KEEPALIVE maintenance configuration remained present/i);
+  assert.match(body.answer, /does not identify an operator, establish successful execution/i);
+  assert.match(body.answer, /link the task to specific anomalies/i);
+  assert.match(body.answer, /unresolved anomaly, not evidence of a specific operator/i);
+  assert.deepEqual(body.sources.map(({ id }) => id), ["ARC-004", "ARC-006", "ARC-008"]);
+  assertCitationsBelongToSources(body);
+});
+
+test("Curator synthesizes broad post-shutdown evidence concisely and distinguishes facts from limits", async (t) => {
+  const previousFetch = global.fetch;
+  t.after(() => { global.fetch = previousFetch; });
+  let modelCalled = false;
+  global.fetch = async () => {
+    modelCalled = true;
+    return Response.json({ message: { content: "A lengthy unsupported synthesis [ARC-001]." } });
+  };
+
+  const response = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", {
+    question: "What evidence suggests activity continued after shutdown?",
+  }));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(modelCalled, false);
+  assert.equal(body.direct, true);
+  assert.deepEqual(body.sources.map(({ id }) => id), ["ARC-001", "ARC-004", "ARC-006"]);
+  assert.match(body.answer, /public operations ended effective October 12, 2009/i);
+  assert.match(body.answer, /successfully serving thread-17/i);
+  assert.match(body.answer, /maintenance configuration was still present/i);
+  assert.match(body.answer, /suggest the mirror remained accessible/i);
+  assert.match(body.answer, /do not prove the task ran successfully/i);
+  assert.match(body.answer, /identify who initiated the request/i);
+  assert(body.answer.length < 700, `Expected a concise synthesis, got ${body.answer.length} characters`);
+  assertCitationsBelongToSources(body);
+});
+
 test("Curator accepts a valid ARC-007 citation and rejects malformed, missing, or unknown citations", async (t) => {
   const previousFetch = global.fetch;
   t.after(() => { global.fetch = previousFetch; });
@@ -371,10 +430,21 @@ test("Curator accepts a valid ARC-007 citation and rejects malformed, missing, o
   ]) {
     global.fetch = async () => Response.json({ message: { content } });
     const response = await curatorRoute.POST(request());
-    assert.equal(response.status, 502, content);
-    assert.match((await response.json()).error, /specific archive record/i);
+    const body = await response.json();
+    assert.equal(response.status, 200, content);
+    assert.equal(body.fallback, true);
+    assert.equal(body.answer.includes(content), false);
+    assertCitationsBelongToSources(body);
   }
 });
+
+function assertCitationsBelongToSources(body) {
+  const sourceIds = new Set(body.sources.map(({ id }) => id));
+  const citedIds = [...body.answer.matchAll(/\[(ARC-\d{3})\]/g)].map(([, id]) => id);
+  assert(citedIds.length > 0, "Expected at least one archive citation");
+  assert(citedIds.every((id) => archive.some((record) => record.id === id)), "Every citation must be a verified archive record");
+  assert(citedIds.every((id) => sourceIds.has(id)), "Every citation must be in the response source bundle");
+}
 
 test("Curator resolves specific record questions by ID and title", async (t) => {
   const previousFetch = global.fetch;
@@ -409,17 +479,17 @@ test("Curator gracefully falls back on model timeout and server error responses"
     error.name = "TimeoutError";
     throw error;
   };
-  const timeoutRes = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question: "what does the mirror export date show?" }));
+  const timeoutRes = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question: "What happened in the mirror server log?" }));
   assert.equal(timeoutRes.status, 200);
   const timeoutBody = await timeoutRes.json();
   assert.equal(timeoutBody.fallback, true);
-  assert(timeoutBody.sources.some((source) => source.id === "ARC-007"));
+  assert(timeoutBody.sources.some((source) => source.id === "ARC-004"));
 
   // HTTP 500 error from Ollama
   global.fetch = async () => new Response("Internal Server Error", { status: 500 });
-  const errRes = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question: "what does the mirror export date show?" }));
+  const errRes = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question: "What happened in the mirror server log?" }));
   assert.equal(errRes.status, 200);
   const errBody = await errRes.json();
   assert.equal(errBody.fallback, true);
-  assert(errBody.sources.some((source) => source.id === "ARC-007"));
+  assert(errBody.sources.some((source) => source.id === "ARC-004"));
 });

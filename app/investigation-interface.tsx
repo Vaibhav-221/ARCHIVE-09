@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type SyntheticEvent,
 } from "react";
@@ -231,7 +232,6 @@ function CuratorPanel({
           value={question}
           onChange={(event) => onQuestionChange(event.target.value)}
           placeholder="What happened after the shutdown notice?"
-          disabled={isAsking}
           aria-describedby={`${questionId}-help`}
         />
         <div className="curator-form-foot">
@@ -241,34 +241,36 @@ function CuratorPanel({
           </button>
         </div>
       </form>
-      {error && <p className="inline-error curator-error" role="alert">{error}</p>}
-      {isAsking && <p className="curator-loading" role="status"><span className="loading-mark" /> Reviewing archive evidence…</p>}
-      {result && (
-        <div className="curator-response" aria-live="polite">
-          {result.fallback && <p className="curator-fallback-note" role="status">LOCAL MODEL UNAVAILABLE / DIRECT ARCHIVE EXPLANATION</p>}
-          {result.direct && <p className="curator-fallback-note" role="status">DIRECT ARCHIVE EXPLANATION</p>}
-          {askedQuestion && <p className="asked-question"><span>YOUR QUESTION</span>{askedQuestion}</p>}
-          <p className="micro-label">CURATOR RESPONSE</p>
-          <p className="curator-answer">{result.answer}</p>
-          <div className="source-block">
+      <div className="curator-response-region" aria-live="polite" aria-busy={isAsking}>
+        {error && <p className="inline-error curator-error" role="alert">{error}</p>}
+        {isAsking && <p className="curator-loading" role="status"><span className="loading-mark" /> Reviewing archive evidence…</p>}
+        {result && (
+          <div className="curator-response">
+            {result.fallback && <p className="curator-fallback-note" role="status">LOCAL MODEL UNAVAILABLE / DIRECT ARCHIVE EXPLANATION</p>}
+            {result.direct && <p className="curator-fallback-note" role="status">DIRECT ARCHIVE EXPLANATION</p>}
+            {askedQuestion && <p className="asked-question"><span>YOUR QUESTION</span>{askedQuestion}</p>}
+            <p className="micro-label">CURATOR RESPONSE</p>
+            <p className="curator-answer">{result.answer}</p>
+            <div className="source-block">
               <span className="source-heading">CITED ARCHIVE RECORDS</span>
               <p className="curator-source-note">The Curator can misread a record. Open each citation to verify what it supports.</p>
-            {result.sources.length === 0 ? (
-              <p className="no-sources">No archive records were retrieved for this question.</p>
-            ) : (
-              <ul className="source-list">
-                {result.sources.map((source) => (
-                  <li key={source.id}>
-                    <button type="button" onClick={() => onSourceOpen(source.id)}>
-                      <span>{source.id}</span><strong>{source.title}</strong><time dateTime={source.date}>{source.date}</time>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+              {result.sources.length === 0 ? (
+                <p className="no-sources">No archive records were retrieved for this question.</p>
+              ) : (
+                <ul className="source-list">
+                  {result.sources.map((source) => (
+                    <li key={source.id}>
+                      <button type="button" onClick={() => onSourceOpen(source.id)}>
+                        <span>{source.id}</span><strong>{source.title}</strong><time dateTime={source.date}>{source.date}</time>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
       <div className="curator-footnote">LOCAL MODEL <span>·</span> EVIDENCE-LED ANSWERS</div>
     </section>
   );
@@ -310,6 +312,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   const [isSubmittingTheory, setIsSubmittingTheory] = useState(false);
   const theme = useSyncExternalStore(subscribeToTheme, getThemeSnapshot, getServerThemeSnapshot);
   const curatorRequestLock = useRef(false);
+  const theoryRequestLock = useRef(false);
   const documentDialogRef = useRef<HTMLDialogElement>(null);
   const aboutDialogRef = useRef<HTMLDialogElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -499,10 +502,6 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
     if (!archive.some((record) => record.id === id)) return;
     const current = document.activeElement;
     if (current instanceof HTMLElement) returnFocusRef.current = current;
-    setSection("home");
-    setSearchResults(null);
-    setSearchQuery("");
-    setSearchError("");
     setActiveRecordId(id);
     setDocumentOpen(true);
   }
@@ -514,6 +513,20 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   function handleDocumentCancel(event: SyntheticEvent<HTMLDialogElement>) {
     event.preventDefault();
     closeDocument();
+  }
+
+  function handleDocumentKeyDown(event: ReactKeyboardEvent<HTMLDialogElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeDocument();
+    }
+  }
+
+  function handleAboutKeyDown(event: ReactKeyboardEvent<HTMLDialogElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setAboutOpen(false);
+    }
   }
 
   function handleDocumentBackdrop(event: MouseEvent<HTMLDialogElement>) {
@@ -553,8 +566,6 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
 
     curatorRequestLock.current = true;
     setIsAsking(true);
-    setLastQuestion(prompt);
-    setCuratorResult(null);
     try {
       const response = await fetch("/api/curator", {
         method: "POST",
@@ -573,6 +584,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
       ) {
         throw new Error("The Curator returned an unexpected response.");
       }
+      setLastQuestion(prompt);
       setCuratorResult(payload as CuratorResponse);
     } catch (error) {
       setCuratorError(error instanceof Error ? error.message : "The Curator could not answer right now.");
@@ -585,7 +597,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   async function submitTheory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setTheoryError("");
-    if (isSubmittingTheory || !gameProgressReady) return;
+    if (isSubmittingTheory || theoryRequestLock.current || !gameProgressReady) return;
     if (supportingEvidenceIds.length < 2) {
       setTheoryError("Choose at least two saved records that support your explanation.");
       return;
@@ -605,6 +617,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
       counterEvidenceIds,
       unresolvedQuestion: unresolvedQuestion.trim(),
     };
+    theoryRequestLock.current = true;
     setIsSubmittingTheory(true);
     setTheoryResult(null);
     try {
@@ -632,6 +645,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
     } catch (error) {
       setTheoryError(error instanceof Error ? error.message : "The theory could not be evaluated.");
     } finally {
+      theoryRequestLock.current = false;
       setIsSubmittingTheory(false);
     }
   }
@@ -953,8 +967,10 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
           className={`document-dialog${activeRecord.reliability === "low" ? " is-anomalous" : ""}`}
           aria-labelledby="document-title"
           aria-describedby="document-content"
+          aria-modal="true"
           data-reliability={activeRecord.reliability}
           onCancel={handleDocumentCancel}
+          onKeyDown={handleDocumentKeyDown}
           onClick={handleDocumentBackdrop}
         >
           <article className="document-sheet">
@@ -1006,6 +1022,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
         className="about-dialog"
         aria-labelledby="about-title"
         onCancel={(event) => { event.preventDefault(); setAboutOpen(false); }}
+        onKeyDown={handleAboutKeyDown}
         onClick={(event) => { if (event.target === event.currentTarget) setAboutOpen(false); }}
       >
         <article className="about-sheet">

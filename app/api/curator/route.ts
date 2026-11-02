@@ -17,7 +17,8 @@ Use only the supplied records. Do not invent events, people, identities, dates, 
 For factual claims, cite the specific supplied record ID in square brackets, such as [ARC-004]. Only cite IDs included in the evidence bundle, and put citations next to the claims they support.
 Separate what a record explicitly says from interpretation. State when the evidence is insufficient and identify plausible alternatives without presenting them as facts.
 Do not infer consciousness, intent, or operator identity from a successful server response, a timestamp, a query token, or a missing record.
-Keep the answer to 2–4 short sentences. Do not claim that a citation proves more than its record states.`;
+Keep the answer to 2–4 short sentences. Do not claim that a citation proves more than its record states.
+Return each sentence with its supporting record IDs in the structured response format.`;
 
 interface RecordExplanation {
   id: string;
@@ -25,6 +26,15 @@ interface RecordExplanation {
   date: string;
   distinctiveTerms: string[];
   explanation: string;
+}
+
+interface CuratorModelSentence {
+  text: string;
+  citations: unknown[];
+}
+
+interface CuratorModelOutput {
+  sentences: CuratorModelSentence[];
 }
 
 const RECORD_EXPLANATIONS: Record<string, RecordExplanation> = {
@@ -104,6 +114,23 @@ const RECORD_EXPLANATIONS: Record<string, RecordExplanation> = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isCuratorModelSentence(value: unknown): value is CuratorModelSentence {
+  return isRecord(value)
+    && Object.keys(value).length === 2
+    && typeof value.text === "string"
+    && Boolean(value.text.trim())
+    && Array.isArray(value.citations);
+}
+
+function isCuratorModelOutput(value: unknown): value is CuratorModelOutput {
+  return isRecord(value)
+    && Object.keys(value).length === 1
+    && Array.isArray(value.sentences)
+    && value.sentences.length >= 2
+    && value.sentences.length <= 4
+    && value.sentences.every(isCuratorModelSentence);
 }
 
 function normalizeQuery(value: string): string {
@@ -405,6 +432,31 @@ export async function POST(request: Request) {
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: JSON.stringify({ question: question.trim(), evidence }) },
     ],
+    format: {
+      type: "object",
+      properties: {
+        sentences: {
+          type: "array",
+          minItems: 2,
+          maxItems: 4,
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string" },
+              citations: {
+                type: "array",
+                minItems: 1,
+                items: { type: "string", enum: records.map(({ id }) => id) },
+              },
+            },
+            required: ["text", "citations"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["sentences"],
+      additionalProperties: false,
+    },
     stream: false,
   };
   const requestBody = JSON.stringify(modelRequest);
@@ -482,8 +534,8 @@ export async function POST(request: Request) {
   }
 
   const includedRecords = new Map(records.map((record) => [record.id, record]));
-  const answer = data.message.content.trim().slice(0, MAX_MODEL_OUTPUT);
-  if (!answer) {
+  const modelOutput = data.message.content.trim().slice(0, MAX_MODEL_OUTPUT);
+  if (!modelOutput) {
     logCuratorDiagnostic("warn", "Ollama returned empty model output", {
       endpoint,
       model: MODEL,
@@ -493,33 +545,77 @@ export async function POST(request: Request) {
     return fallbackResponse(records, question);
   }
 
-  const archiveReferences = [...answer.matchAll(/\[([^\]]*ARC[^\]]*)\]/gi)];
-  const malformedCitations = archiveReferences
-    .map(([, id]) => id)
-    .filter((id) => !/^ARC-\d{3}$/.test(id));
-  const unknownCitations = archiveReferences
-    .map(([, id]) => id)
-    .filter((id) => /^ARC-\d{3}$/.test(id) && !includedRecords.has(id));
-  if (malformedCitations.length > 0 || unknownCitations.length > 0 || archiveReferences.length === 0) {
-    const reason = archiveReferences.length === 0
-      ? "missing"
-      : malformedCitations.length > 0
-        ? "malformed"
-        : "not-in-evidence";
+  let structuredOutput: unknown;
+  try {
+    structuredOutput = JSON.parse(modelOutput) as unknown;
+  } catch {
+    logCuratorDiagnostic("warn", "Ollama structured output JSON could not be parsed", {
+      endpoint,
+      model: MODEL,
+      status: response.status,
+      durationMs: Date.now() - requestStartedAt,
+      outputLength: modelOutput.length,
+    });
+    return fallbackResponse(records, question, "citation-rejected");
+  }
+
+  if (!isCuratorModelOutput(structuredOutput)) {
+    logCuratorDiagnostic("warn", "Ollama structured output shape was invalid", {
+      endpoint,
+      model: MODEL,
+      status: response.status,
+      durationMs: Date.now() - requestStartedAt,
+    });
+    return fallbackResponse(records, question, "citation-rejected");
+  }
+
+  const sentences = structuredOutput.sentences;
+  const sentenceCitations = sentences.flatMap(({ citations }) => citations);
+  const textReferences = sentences.flatMap(({ text }) =>
+    [...text.matchAll(/\bARC(?:-[A-Z0-9_-]+|[ \t]+[A-Z0-9_-]+)\b/gi)].map(([id]) => id)
+  );
+  const allCitations: unknown[] = [...sentenceCitations, ...textReferences];
+  const malformedCitations = allCitations.filter(
+    (id) => typeof id !== "string" || !/^ARC-\d{3}$/.test(id)
+  );
+  const unknownCitations = allCitations.filter(
+    (id): id is string => typeof id === "string" && /^ARC-\d{3}$/.test(id) && !includedRecords.has(id)
+  );
+  const missingSentenceCount = sentences.filter(({ citations }) => citations.length === 0).length;
+  if (malformedCitations.length > 0 || unknownCitations.length > 0 || missingSentenceCount > 0) {
+    const reason = malformedCitations.length > 0
+      ? "malformed"
+      : unknownCitations.length > 0
+        ? "not-in-evidence"
+        : "missing";
     logCuratorDiagnostic("warn", "Ollama citations rejected", {
       endpoint,
       model: MODEL,
       status: response.status,
       durationMs: Date.now() - requestStartedAt,
       reason,
-      citationCount: archiveReferences.length,
+      citationCount: allCitations.length,
       malformedCount: malformedCitations.length,
       notInEvidenceCount: unknownCitations.length,
+      missingSentenceCount,
     });
     return fallbackResponse(records, question, "citation-rejected");
   }
 
-  const citedIds = new Set(archiveReferences.map(([, id]) => id));
+  const citedIds = new Set([
+    ...sentenceCitations.filter((id): id is string => typeof id === "string"),
+    ...textReferences,
+  ]);
+  const answer = sentences.map(({ text, citations }) => {
+    const textCitationIds = new Set(
+      [...text.matchAll(/\bARC(?:-[A-Z0-9_-]+|[ \t]+[A-Z0-9_-]+)\b/gi)].map(([id]) => id)
+    );
+    const citationSuffix = [...new Set(citations.filter((id): id is string => typeof id === "string"))]
+      .filter((id) => !textCitationIds.has(id))
+      .map((id) => `[${id}]`)
+      .join(" ");
+    return `${text.trim()}${citationSuffix ? ` ${citationSuffix}` : ""}`;
+  }).join(" ");
   const sources = [...citedIds].map((id) => {
     const { title, date } = includedRecords.get(id)!;
     return { id, title, date };

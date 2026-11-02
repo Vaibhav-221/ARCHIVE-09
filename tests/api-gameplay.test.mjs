@@ -377,6 +377,34 @@ test("Curator answers mirror-operator questions with grounded uncertainty from A
   assertCitationsBelongToSources(body);
 });
 
+test("Curator resolves AI-operator questions even when lexical retrieval has no matches", async (t) => {
+  const previousFetch = global.fetch;
+  t.after(() => { global.fetch = previousFetch; });
+  let modelCalled = false;
+  const question = "What evidence proves that the operator was an AI?";
+  global.fetch = async () => {
+    modelCalled = true;
+    throw new Error("The deterministic answer should not call Ollama");
+  };
+
+  assert.deepEqual(retrieval.searchArchive(question, 4), []);
+  const response = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question }));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(modelCalled, false);
+  assert.equal(body.direct, true);
+  assert.deepEqual(body.sources.map(({ id }) => id), ["ARC-006", "ARC-008", "ARC-009"]);
+  assert.match(body.answer, /do not prove that an AI operated the mirror/i);
+  assert.match(body.answer, /KEEPALIVE configuration remained present/i);
+  assert.match(body.answer, /not that it ran successfully or who operated it/i);
+  assert.match(body.answer, /unresolved reply reference/i);
+  assert.match(body.answer, /automation is only one possible explanation/i);
+  assert.match(body.answer, /unverified.*wrong copy.*query/i);
+  assert.match(body.answer, /originating process and requesting identity are unavailable/i);
+  assertCitationsBelongToSources(body);
+});
+
 test("Curator synthesizes broad post-shutdown evidence concisely and distinguishes facts from limits", async (t) => {
   const previousFetch = global.fetch;
   t.after(() => { global.fetch = previousFetch; });
@@ -411,9 +439,16 @@ test("Curator accepts a valid ARC-007 citation and rejects malformed, missing, o
   const question = "When did the mirror export happen?";
   const request = () => jsonRequest("http://localhost/api/curator", { question });
 
-  global.fetch = async (_url, init) => {
+  let requestUrl;
+  let requestPayload;
+  global.fetch = async (url, init) => {
+    requestUrl = url;
+    requestPayload = JSON.parse(init.body);
     const evidence = JSON.parse(init.body).messages[1].content;
     assert.match(evidence, /ARC-007/);
+    assert.equal(init.method, "POST");
+    assert.equal(init.cache, "no-store");
+    assert(init.signal instanceof AbortSignal);
     return Response.json({ message: { content: "The mirror export timestamp was 2009-10-15 23:41:08 [ARC-007]." } });
   };
   const valid = await curatorRoute.POST(request());
@@ -421,11 +456,42 @@ test("Curator accepts a valid ARC-007 citation and rejects malformed, missing, o
   assert.equal(valid.status, 200);
   assert.deepEqual(validBody.sources.map(({ id }) => id), ["ARC-007"]);
   assert.match(validBody.answer, /\[ARC-007\]/);
+  assert.equal(requestUrl, process.env.OLLAMA_URL || "http://localhost:11434/api/chat");
+  assert.equal(requestPayload.model, process.env.OLLAMA_MODEL || "qwen2.5-coder:3b");
+  assert.equal(requestPayload.stream, false);
+  assert.equal(requestPayload.messages[0].role, "system");
+  assert.equal(requestPayload.messages[1].role, "user");
+  assertCitationsBelongToSources(validBody);
+
+  const canonicalIds = archive.map(({ id }) => id);
+  assert.deepEqual(canonicalIds, [
+    "ARC-001", "ARC-002", "ARC-003", "ARC-004", "ARC-005",
+    "ARC-006", "ARC-007", "ARC-008", "ARC-009",
+  ]);
+  for (const id of canonicalIds) {
+    const question = id === "ARC-007" ? "When did the mirror export happen?" : `What does ${id} say?`;
+    global.fetch = async (_url, init) => {
+      const requestContent = JSON.parse(init.body).messages[1].content;
+      const evidence = JSON.parse(requestContent).evidence;
+      assert(evidence.some((record) => record.id === id), `Expected ${id} in the evidence bundle`);
+      return Response.json({ message: { content: `The record is available [${id}].` } });
+    };
+
+    const response = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question }));
+    const body = await response.json();
+    assert.equal(response.status, 200, id);
+    assert.equal(body.fallback, false, id);
+    assert.deepEqual(body.sources.map(({ id: sourceId }) => sourceId), [id]);
+    assertCitationsBelongToSources(body);
+  }
 
   for (const content of [
     "The mirror export timestamp was 2009-10-15 23:41:08 [ARC 007].",
     "The mirror export timestamp was 2009-10-15 23:41:08.",
     "The mirror operator was identified [ARC-999].",
+    "The mirror operator was identified [ARC-000].",
+    "The mirror operator was identified [ARC-010].",
+    "A valid citation [ARC-007] cannot validate an unsupported citation [ARC-003].",
     "The mirror operator was identified [ARC-007] and ARC-999 confirms it [ARC-999].",
   ]) {
     global.fetch = async () => Response.json({ message: { content } });
@@ -445,6 +511,76 @@ function assertCitationsBelongToSources(body) {
   assert(citedIds.every((id) => archive.some((record) => record.id === id)), "Every citation must be a verified archive record");
   assert(citedIds.every((id) => sourceIds.has(id)), "Every citation must be in the response source bundle");
 }
+
+test("Curator logs safe diagnostics and returns grounded fallbacks for Ollama failures", async (t) => {
+  const previousFetch = global.fetch;
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousInfo = console.info;
+  const previousWarn = console.warn;
+  const previousError = console.error;
+  const diagnostics = [];
+  process.env.NODE_ENV = "development";
+  t.after(() => {
+    global.fetch = previousFetch;
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    console.info = previousInfo;
+    console.warn = previousWarn;
+    console.error = previousError;
+  });
+
+  for (const level of ["info", "warn", "error"]) {
+    console[level] = (...args) => diagnostics.push({
+      level,
+      args: args.map((value) => typeof value === "string" ? value : JSON.stringify(value)).join(" "),
+    });
+  }
+
+  const question = "What happened in the mirror server log?";
+  const cases = [
+    { event: "Ollama connection failed", fetch: async () => {
+      const error = new TypeError("fetch failed", { cause: Object.assign(new Error("details stay private"), { code: "ECONNREFUSED" }) });
+      throw error;
+    } },
+    { event: "Ollama request timed out", fetch: async () => { const error = new Error("timeout"); error.name = "TimeoutError"; throw error; } },
+    { event: "Ollama returned a non-success status", fetch: async () => new Response("unavailable", { status: 503 }) },
+    { event: "Ollama response JSON could not be parsed", fetch: async () => new Response("{", { headers: { "Content-Type": "application/json" } }) },
+    { event: "Ollama response shape was invalid", fetch: async () => Response.json({ message: { content: 3 } }) },
+    { event: "Ollama returned empty model output", fetch: async () => Response.json({ message: { content: "  " } }) },
+    { event: "Ollama citations rejected", reason: '"reason":"missing"', fetch: async () => Response.json({ message: { content: "Uncited answer." } }) },
+    { event: "Ollama citations rejected", reason: '"reason":"malformed"', fetch: async () => Response.json({ message: { content: "Malformed record [ARC 004]." } }) },
+    { event: "Ollama citations rejected", reason: '"reason":"not-in-evidence"', fetch: async () => Response.json({ message: { content: "Unknown record [ARC-999]." } }) },
+  ];
+
+  for (const item of cases) {
+    global.fetch = item.fetch;
+    const response = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question }));
+    const body = await response.json();
+    assert.equal(response.status, 200, item.event);
+    assert.equal(body.fallback, true, item.event);
+    assertCitationsBelongToSources(body);
+    assert(diagnostics.some(({ args }) => args.includes(item.event)), `Missing diagnostic: ${item.event}`);
+  }
+
+  const serializedDiagnostics = diagnostics.map(({ args }) => args).join("\n");
+  assert.equal(serializedDiagnostics.includes(question), false);
+  assert.equal(serializedDiagnostics.includes("You are The Curator"), false);
+  assert.equal(serializedDiagnostics.includes("fetch failed"), false);
+  assert(serializedDiagnostics.includes("ECONNREFUSED"));
+  assert(serializedDiagnostics.includes('"timeoutMs":30000'));
+  assert(serializedDiagnostics.includes("http://localhost:11434/api/chat"));
+  assert(serializedDiagnostics.includes("requestBodyBytes"));
+  for (const reason of ['"reason":"missing"', '"reason":"malformed"', '"reason":"not-in-evidence"']) {
+    assert(serializedDiagnostics.includes(reason), `Missing citation diagnostic reason: ${reason}`);
+  }
+
+  const previousDiagnosticCount = diagnostics.length;
+  process.env.NODE_ENV = "production";
+  global.fetch = async () => Response.json({ message: { content: "Uncited answer." } });
+  const productionResponse = await curatorRoute.POST(jsonRequest("http://localhost/api/curator", { question }));
+  assert.equal((await productionResponse.json()).fallback, true);
+  assert.equal(diagnostics.length, previousDiagnosticCount, "Curator diagnostics should only be emitted in development");
+});
 
 test("Curator resolves specific record questions by ID and title", async (t) => {
   const previousFetch = global.fetch;

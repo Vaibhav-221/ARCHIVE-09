@@ -119,6 +119,12 @@ function asksForMessageText(question: string): boolean {
   return /\b(?:message|quote|text|words)\b/.test(normalizeQuery(question));
 }
 
+function asksAboutAiOperator(question: string): boolean {
+  const normalized = normalizeQuery(question);
+  return /\b(?:ai|artificial intelligence)\b/.test(normalized)
+    && /\b(?:operator|operat\w*|mirror)\b/.test(normalized);
+}
+
 function asksWhoOperatedMirror(question: string): boolean {
   const normalized = normalizeQuery(question);
   return /\bwho\b/.test(normalized)
@@ -235,6 +241,17 @@ function createDirectOperatorResponse(records: ReturnType<typeof searchArchive>)
   });
 }
 
+function createDirectAiOperatorResponse(records: ReturnType<typeof searchArchive>): Response | null {
+  const includedIds = new Set(records.map(({ id }) => id));
+  if (!["ARC-006", "ARC-008", "ARC-009"].every((id) => includedIds.has(id))) return null;
+
+  return Response.json({
+    answer: "The recovered records do not prove that an AI operated the mirror [ARC-006] [ARC-008] [ARC-009]. ARC-006 establishes that the periodic KEEPALIVE configuration remained present, but not that it ran successfully or who operated it [ARC-006]. ARC-008 records an unresolved reply reference with no recovered body or matching database record; automation is only one possible explanation [ARC-008]. ARC-009 contains an unverified “wrong copy” query whose originating process and requesting identity are unavailable, so the operator's identity remains unknown [ARC-009].",
+    sources: records.map(({ id, title, date }) => ({ id, title, date })),
+    direct: true,
+  });
+}
+
 function createDirectActivityResponse(records: ReturnType<typeof searchArchive>): Response | null {
   const includedIds = new Set(records.map(({ id }) => id));
   if (!["ARC-001", "ARC-004", "ARC-006"].every((id) => includedIds.has(id))) return null;
@@ -246,7 +263,11 @@ function createDirectActivityResponse(records: ReturnType<typeof searchArchive>)
   });
 }
 
-function createGroundedFallback(records: ReturnType<typeof searchArchive>, question: string): {
+function createGroundedFallback(
+  records: ReturnType<typeof searchArchive>,
+  question: string,
+  reason: "model-unavailable" | "citation-rejected",
+): {
   answer: string;
   sources: { id: string; title: string; date: string }[];
   fallback: true;
@@ -262,9 +283,12 @@ function createGroundedFallback(records: ReturnType<typeof searchArchive>, quest
     return `In ${record.title} (${record.date}), the archive states: “${directExcerpt(record.content)}” [${record.id}].`;
   });
 
+  const status = reason === "citation-rejected"
+    ? "The model response did not meet the archive citation requirements."
+    : "The local AI model could not provide a usable response.";
   const intro = isTargeted
-    ? "The local AI model is unavailable. The following is a direct archive-based explanation grounded in recovered records rather than an AI-generated response:"
-    : "The local AI model is unavailable. The following are direct archive-based excerpts and explanations grounded in recovered records rather than an AI-generated response:";
+    ? `${status} The following is a direct archive-based explanation grounded in recovered records rather than an AI-generated response:`
+    : `${status} The following are direct archive-based excerpts and explanations grounded in recovered records rather than an AI-generated response:`;
 
   return {
     answer: `${intro}\n\n${explanations.join("\n\n")}`,
@@ -273,9 +297,36 @@ function createGroundedFallback(records: ReturnType<typeof searchArchive>, quest
   };
 }
 
-function fallbackResponse(records: ReturnType<typeof searchArchive>, question: string) {
-  const result = createGroundedFallback(records, question);
+function fallbackResponse(
+  records: ReturnType<typeof searchArchive>,
+  question: string,
+  reason: "model-unavailable" | "citation-rejected" = "model-unavailable",
+) {
+  const result = createGroundedFallback(records, question, reason);
   return Response.json(result);
+}
+
+function logCuratorDiagnostic(level: "info" | "warn" | "error", event: string, details: Record<string, unknown> = {}) {
+  if (process.env.NODE_ENV !== "development") return;
+
+  const message = `[Curator] ${event} ${JSON.stringify(details)}`;
+  if (level === "error") console.error(message);
+  else if (level === "warn") console.warn(message);
+  else console.info(message);
+}
+
+function getSafeEndpoint(): string {
+  try {
+    const endpoint = new URL(OLLAMA_URL);
+    return `${endpoint.origin}${endpoint.pathname}`;
+  } catch {
+    return "<invalid endpoint>";
+  }
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (!isRecord(error) || !isRecord(error.cause)) return undefined;
+  return typeof error.cause.code === "string" ? error.cause.code : undefined;
 }
 
 export async function POST(request: Request) {
@@ -301,6 +352,11 @@ export async function POST(request: Request) {
   }
   if (question.length > MAX_QUESTION_LENGTH) {
     return Response.json({ error: `Questions must be ${MAX_QUESTION_LENGTH} characters or fewer.` }, { status: 413 });
+  }
+
+  if (asksAboutAiOperator(question.trim())) {
+    const directResponse = createDirectAiOperatorResponse(getRecordsById(["ARC-006", "ARC-008", "ARC-009"]));
+    if (directResponse) return directResponse;
   }
 
   const rawRecords = searchArchive(question.trim(), MAX_SOURCES);
@@ -333,7 +389,35 @@ export async function POST(request: Request) {
     id, title, type, date, author, content, tags, reliability,
   }));
 
-  if (activeModelRequests >= MAX_ACTIVE_MODEL_REQUESTS) return fallbackResponse(records, question);
+  if (activeModelRequests >= MAX_ACTIVE_MODEL_REQUESTS) {
+    logCuratorDiagnostic("warn", "Ollama request skipped at concurrency limit", {
+      model: MODEL,
+      activeRequests: activeModelRequests,
+      maxActiveRequests: MAX_ACTIVE_MODEL_REQUESTS,
+      evidenceIds: records.map(({ id }) => id),
+    });
+    return fallbackResponse(records, question);
+  }
+
+  const modelRequest = {
+    model: MODEL,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: JSON.stringify({ question: question.trim(), evidence }) },
+    ],
+    stream: false,
+  };
+  const requestBody = JSON.stringify(modelRequest);
+  const endpoint = getSafeEndpoint();
+  const requestStartedAt = Date.now();
+  logCuratorDiagnostic("info", "Ollama request started", {
+    endpoint,
+    model: MODEL,
+    timeoutMs: OLLAMA_TIMEOUT_MS,
+    requestBodyBytes: new TextEncoder().encode(requestBody).byteLength,
+    questionLength: question.trim().length,
+    evidenceIds: records.map(({ id }) => id),
+  });
 
   let response: Response;
   activeModelRequests += 1;
@@ -341,29 +425,45 @@ export async function POST(request: Request) {
     response = await fetch(OLLAMA_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: JSON.stringify({ question: question.trim(), evidence }) },
-        ],
-        stream: false,
-      }),
+      body: requestBody,
       cache: "no-store",
       signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
     });
-  } catch {
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    logCuratorDiagnostic("error", timedOut ? "Ollama request timed out" : "Ollama connection failed", {
+      endpoint,
+      model: MODEL,
+      timeoutMs: OLLAMA_TIMEOUT_MS,
+      durationMs: Date.now() - requestStartedAt,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      errorCode: getErrorCode(error),
+    });
     return fallbackResponse(records, question);
   } finally {
     activeModelRequests -= 1;
   }
 
-  if (!response.ok) return fallbackResponse(records, question);
+  if (!response.ok) {
+    logCuratorDiagnostic("error", "Ollama returned a non-success status", {
+      endpoint,
+      model: MODEL,
+      status: response.status,
+      durationMs: Date.now() - requestStartedAt,
+    });
+    return fallbackResponse(records, question);
+  }
 
   let data: unknown;
   try {
     data = await response.json();
   } catch {
+    logCuratorDiagnostic("error", "Ollama response JSON could not be parsed", {
+      endpoint,
+      model: MODEL,
+      status: response.status,
+      durationMs: Date.now() - requestStartedAt,
+    });
     return fallbackResponse(records, question);
   }
 
@@ -371,25 +471,65 @@ export async function POST(request: Request) {
     !isRecord(data)
     || !isRecord(data.message)
     || typeof data.message.content !== "string"
-  ) return fallbackResponse(records, question);
+  ) {
+    logCuratorDiagnostic("error", "Ollama response shape was invalid", {
+      endpoint,
+      model: MODEL,
+      status: response.status,
+      durationMs: Date.now() - requestStartedAt,
+    });
+    return fallbackResponse(records, question);
+  }
 
   const includedRecords = new Map(records.map((record) => [record.id, record]));
   const answer = data.message.content.trim().slice(0, MAX_MODEL_OUTPUT);
+  if (!answer) {
+    logCuratorDiagnostic("warn", "Ollama returned empty model output", {
+      endpoint,
+      model: MODEL,
+      status: response.status,
+      durationMs: Date.now() - requestStartedAt,
+    });
+    return fallbackResponse(records, question);
+  }
+
   const archiveReferences = [...answer.matchAll(/\[([^\]]*ARC[^\]]*)\]/gi)];
-  if (archiveReferences.some(([, id]) => !/^ARC-\d{3}$/.test(id) || !includedRecords.has(id))) {
-    return fallbackResponse(records, question);
+  const malformedCitations = archiveReferences
+    .map(([, id]) => id)
+    .filter((id) => !/^ARC-\d{3}$/.test(id));
+  const unknownCitations = archiveReferences
+    .map(([, id]) => id)
+    .filter((id) => /^ARC-\d{3}$/.test(id) && !includedRecords.has(id));
+  if (malformedCitations.length > 0 || unknownCitations.length > 0 || archiveReferences.length === 0) {
+    const reason = archiveReferences.length === 0
+      ? "missing"
+      : malformedCitations.length > 0
+        ? "malformed"
+        : "not-in-evidence";
+    logCuratorDiagnostic("warn", "Ollama citations rejected", {
+      endpoint,
+      model: MODEL,
+      status: response.status,
+      durationMs: Date.now() - requestStartedAt,
+      reason,
+      citationCount: archiveReferences.length,
+      malformedCount: malformedCitations.length,
+      notInEvidenceCount: unknownCitations.length,
+    });
+    return fallbackResponse(records, question, "citation-rejected");
   }
 
-  const citedIds = new Set<string>();
-  for (const [, id] of archiveReferences) citedIds.add(id);
-
-  if (citedIds.size === 0) {
-    return fallbackResponse(records, question);
-  }
-
+  const citedIds = new Set(archiveReferences.map(([, id]) => id));
   const sources = [...citedIds].map((id) => {
     const { title, date } = includedRecords.get(id)!;
     return { id, title, date };
+  });
+  logCuratorDiagnostic("info", "Ollama response accepted", {
+    endpoint,
+    model: MODEL,
+    status: response.status,
+    durationMs: Date.now() - requestStartedAt,
+    citationCount: citedIds.size,
   });
   return Response.json({ answer, sources, fallback: false });
 }

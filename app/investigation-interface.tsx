@@ -318,6 +318,39 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const aboutReturnFocusRef = useRef<HTMLElement | null>(null);
 
+  useEffect(() => {
+    const revealTargets = document.querySelectorAll<HTMLElement>("[data-reveal], .curator-panel");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (reducedMotion.matches) return;
+
+    document.documentElement.classList.add("reveal-enabled");
+    const revealVisible = () => {
+      for (const element of revealTargets) {
+        const bounds = element.getBoundingClientRect();
+        if (bounds.top < window.innerHeight * 0.98 && bounds.bottom > 0) {
+          element.classList.add("is-revealed");
+        }
+      }
+    };
+    window.addEventListener("scroll", revealVisible, { passive: true });
+    window.addEventListener("resize", revealVisible);
+    revealVisible();
+    const handleMotionChange = (event: MediaQueryListEvent) => {
+      if (!event.matches) return;
+      document.documentElement.classList.remove("reveal-enabled");
+      window.removeEventListener("scroll", revealVisible);
+      window.removeEventListener("resize", revealVisible);
+    };
+    reducedMotion.addEventListener("change", handleMotionChange);
+
+    return () => {
+      window.removeEventListener("scroll", revealVisible);
+      window.removeEventListener("resize", revealVisible);
+      reducedMotion.removeEventListener("change", handleMotionChange);
+      document.documentElement.classList.remove("reveal-enabled");
+    };
+  }, []);
+
   const visibleRecords = useMemo(() => {
     if (searchResults) return searchResults;
     const activeSection = sections.find((item) => item.key === section);
@@ -694,7 +727,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
         </button>
       </header>
 
-      <section className="incident-brief" aria-labelledby="incident-title">
+      <section className="incident-brief" aria-labelledby="incident-title" data-reveal>
         <div className="incident-index"><span>CASE FILE</span><strong>01</strong><span>OPEN</span></div>
         <div className="incident-copy">
           <p className="kicker">THE OCTOBER 16 INCIDENT</p>
@@ -731,7 +764,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
         </div>
 
         <div className="investigation-layout">
-          <aside className="index-rail">
+          <aside className="index-rail" data-reveal>
             <div className="rail-heading">
               <span>DIRECTORY</span><span>{archive.length.toString().padStart(2, "0")} FILES</span>
               <button
@@ -774,7 +807,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
             </div>
           </aside>
 
-          <section className="archive-content" id="archive-records" aria-label="Archive records">
+          <section className="archive-content" id="archive-records" aria-label="Archive records" data-reveal>
             <div className="content-topline">
               <div>
                 <p className="micro-label">ARCHIVED FILES <span>/</span> {searchResults ? "SEARCH RESULTS" : activeSectionLabel.toUpperCase()}</p>
@@ -837,7 +870,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
           </section>
 
           <aside id="investigation-tools" className="utility-rail" aria-label="Evidence notebook and Curator">
-            <section className="notebook-panel" aria-labelledby="notebook-title">
+            <section className="notebook-panel" aria-labelledby="notebook-title" data-reveal>
               <div className="panel-heading">
                 <div><p className="micro-label">PLAYER TOOL / 01</p><h2 id="notebook-title">Evidence notebook</h2></div>
                 <span className="notebook-count">{savedRecords.length.toString().padStart(2, "0")}</span>
@@ -874,7 +907,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
         </div>
         <footer className="browser-footer"><span>OCTOBER ONLINE ARCHIVE</span><span>RECONSTRUCTED FROM {archive.length} RECOVERED RECORDS</span><span>© 2009 / COPY PRESERVED</span></footer>
       </section>
-      <section className="theory-panel" id="submit-theory" aria-labelledby="theory-title">
+      <section className="theory-panel" id="submit-theory" aria-labelledby="theory-title" data-reveal>
         <header className="theory-panel-heading">
           <div>
             <p className="micro-label">INVESTIGATION / FINAL STAGE</p>
@@ -1005,7 +1038,10 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
                 <button
                   type="button"
                   className={`collect-button${savedIds.includes(activeRecord.id) ? " is-saved" : ""}`}
-                  onClick={() => toggleEvidence(activeRecord.id)}
+                  onClick={() => {
+                    toggleEvidence(activeRecord.id);
+                    closeDocument();
+                  }}
                   disabled={!notebookReady || !gameProgressReady}
                   aria-pressed={savedIds.includes(activeRecord.id)}
                 >
@@ -1057,7 +1093,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
           </div>
         </article>
       </dialog>
-      <footer className="page-footer"><span>ARCHIVE 09</span><span>INVESTIGATION INTERFACE / PHASE 03</span><span>PROGRESS IS SAVED IN THIS BROWSER</span></footer>
+      <footer className="page-footer" data-reveal><span>ARCHIVE 09</span><span>INVESTIGATION INTERFACE / PHASE 03</span><span>PROGRESS IS SAVED IN THIS BROWSER</span></footer>
     </main>
   );
 }

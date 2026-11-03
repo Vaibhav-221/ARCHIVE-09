@@ -239,7 +239,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .curator-loading { display: flex; align-items: center; gap: 7px; margin: 12px 0 0; color: #6f786d; font-size: 9px; }
 .curator-loading .loading-mark { width: 8px; height: 8px; }
 .curator-response { margin-top: 13px; padding-top: 11px; border-top: 1px solid #e4e5da; }
-.curator-answer { margin: 7px 0 0; color: #4c554d; font: 11px/1.65 Georgia, "Times New Roman", serif; white-space: pre-wrap; }
+.curator-answer { margin: 7px 0 0; color: #4c554d; font: 12px/1.7 Georgia, "Times New Roman", serif; white-space: pre-wrap; }
 .source-block { margin-top: 12px; padding-top: 9px; border-top: 1px dashed #d9dacf; }
 .source-heading { color: #8a8e82; font: 7px var(--font-mono); letter-spacing: .08em; }
 .source-list { display: grid; margin: 5px 0 0; padding: 0; list-style: none; }
@@ -1178,7 +1178,6 @@ html[data-theme="dark"] .theory-error { border-color:#d17461; background:#392522
   .record-list { max-height:min(42dvh,560px); }
   .utility-rail::before { grid-column:1 / -1; }
   .utility-rail { grid-column:1 / -1; grid-template-columns:repeat(2,minmax(0,1fr)); align-content:start; align-items:stretch; }
-  .notebook-panel,.curator-panel { height:clamp(340px,calc(100dvh - 380px),540px); }
   .notebook-panel { display:flex; flex-direction:column; }
   .evidence-list { flex:1 1 auto; min-height:0; max-height:none; overflow-y:auto; overscroll-behavior:contain; }
 }
@@ -1229,7 +1228,10 @@ html[data-theme="dark"] .document-actions { border-color:#353e38; }
 @media (max-width:720px) {
   .utility-rail,html[data-theme="dark"] .utility-rail { grid-template-columns:minmax(0,1fr); }
   .notebook-panel,.curator-panel { height:auto; min-height:0; }
-  .curator-response-region { max-height:min(52dvh,420px); }
+  .curator-response-region { max-height:min(62dvh,520px); }
+  .curator-response-region:has(.curator-response),
+  .curator-response-region:has(.curator-error) { min-height:clamp(260px,42dvh,420px); }
+  .curator-answer { font-size:13px; }
   .record-list { max-height:min(55dvh,420px); overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
   .evidence-list { max-height:min(42dvh,360px); overflow-y:auto; }
   .document-dialog,html[data-theme="dark"] .document-dialog {
@@ -1325,7 +1327,7 @@ html.reveal-enabled .curator-panel.is-revealed {
   .utility-rail > .curator-panel {
     width:100%;
     min-width:0;
-    height:clamp(340px,calc(100dvh - 380px),540px);
+    height:clamp(440px,calc(100dvh - 320px),680px);
     align-self:stretch;
   }
   .notebook-panel {

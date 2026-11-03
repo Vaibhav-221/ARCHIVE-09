@@ -68,6 +68,8 @@ interface CuratorPanelProps {
   result: CuratorResponse | null;
   askedQuestion: string;
   onSourceOpen: (id: string) => void;
+  expanded?: boolean;
+  onExpand?: () => void;
 }
 
 const NOTEBOOK_KEY = "archive-09:evidence-ids";
@@ -209,24 +211,34 @@ function CuratorPanel({
   result,
   askedQuestion,
   onSourceOpen,
+  expanded = false,
+  onExpand,
 }: CuratorPanelProps) {
-  const questionId = "curator-question";
-  const titleId = "curator-title";
+  const questionId = expanded ? "curator-question-expanded" : "curator-question";
+  const titleId = expanded ? "curator-title-expanded" : "curator-title";
 
   return (
-    <section className="curator-panel" aria-labelledby={titleId}>
+    <section className={`curator-panel${expanded ? " curator-panel-expanded is-revealed" : ""}`} aria-labelledby={titleId}>
       <div className="curator-heading">
         <div className="curator-seal" aria-hidden="true">C</div>
         <div className="curator-heading-copy">
           <p className="micro-label">ARCHIVE ASSISTANT / LOCAL</p>
           <h2 id={titleId}>Ask The Curator</h2>
         </div>
+        {onExpand && (
+          <button className="curator-expand" type="button" onClick={onExpand} aria-label="Open expanded Curator view" title="Open expanded view">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+              <path d="M8 4H4v4M16 4h4v4M20 16v4h-4M4 16v4h4M4 8l6-6M20 8l-6-6M20 16l-6 6M4 16l6 6" />
+            </svg>
+          </button>
+        )}
       </div>
       <p className="panel-description">Ask about the recovered records. The Curator answers from retrieved evidence.</p>
       <form className="curator-form" onSubmit={onSubmit}>
         <label htmlFor={questionId}>YOUR QUESTION</label>
         <textarea
           id={questionId}
+          data-curator-question={expanded ? "expanded" : "main"}
           rows={3}
           maxLength={MAX_QUESTION_LENGTH}
           value={question}
@@ -297,6 +309,7 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   const [curatorError, setCuratorError] = useState("");
   const [curatorResult, setCuratorResult] = useState<CuratorResponse | null>(null);
   const [lastQuestion, setLastQuestion] = useState("");
+  const [curatorExpanded, setCuratorExpanded] = useState(false);
   const [documentOpen, setDocumentOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(true);
@@ -314,6 +327,9 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
   const curatorRequestLock = useRef(false);
   const theoryRequestLock = useRef(false);
   const documentDialogRef = useRef<HTMLDialogElement>(null);
+  const curatorDialogRef = useRef<HTMLDialogElement>(null);
+  const curatorExpandButtonRef = useRef<HTMLButtonElement>(null);
+  const curatorEditRequestedRef = useRef(false);
   const aboutDialogRef = useRef<HTMLDialogElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const aboutReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -379,6 +395,36 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
       }
     }
   }, [activeRecord, documentOpen]);
+
+  useEffect(() => {
+    const dialog = curatorDialogRef.current;
+    if (!dialog) return;
+
+    if (curatorExpanded && !dialog.open) {
+      dialog.showModal();
+      dialog.querySelector<HTMLTextAreaElement>("[data-curator-question='expanded']")?.focus();
+    } else if (!curatorExpanded && dialog.open) {
+      dialog.close();
+      if (curatorEditRequestedRef.current) {
+        curatorEditRequestedRef.current = false;
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLTextAreaElement>("[data-curator-question='main']")?.focus();
+        });
+      } else if (curatorExpandButtonRef.current?.isConnected) {
+        requestAnimationFrame(() => curatorExpandButtonRef.current?.focus({ preventScroll: true }));
+      }
+    }
+  }, [curatorExpanded]);
+
+  useEffect(() => {
+    const desktopOrTablet = window.matchMedia("(min-width: 721px)");
+    const closeOnMobile = (event: MediaQueryListEvent) => {
+      if (event.matches) return;
+      setCuratorExpanded(false);
+    };
+    desktopOrTablet.addEventListener("change", closeOnMobile);
+    return () => desktopOrTablet.removeEventListener("change", closeOnMobile);
+  }, []);
 
   useEffect(() => {
     const dialog = aboutDialogRef.current;
@@ -564,6 +610,22 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
 
   function handleDocumentBackdrop(event: MouseEvent<HTMLDialogElement>) {
     if (event.target === event.currentTarget) closeDocument();
+  }
+
+  function handleCuratorBackdrop(event: MouseEvent<HTMLDialogElement>) {
+    if (event.target === event.currentTarget) setCuratorExpanded(false);
+  }
+
+  function handleCuratorKeyDown(event: ReactKeyboardEvent<HTMLDialogElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setCuratorExpanded(false);
+    }
+  }
+
+  function closeCuratorAndEdit() {
+    curatorEditRequestedRef.current = true;
+    setCuratorExpanded(false);
   }
 
   function toggleEvidence(recordId: string) {
@@ -902,11 +964,45 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
               result={curatorResult}
               askedQuestion={lastQuestion}
               onSourceOpen={openRecord}
+              onExpand={() => {
+                curatorExpandButtonRef.current = document.activeElement instanceof HTMLButtonElement
+                  ? document.activeElement
+                  : null;
+                setCuratorExpanded(true);
+              }}
             />
           </aside>
         </div>
         <footer className="browser-footer"><span>OCTOBER ONLINE ARCHIVE</span><span>RECONSTRUCTED FROM {archive.length} RECOVERED RECORDS</span><span>© 2009 / COPY PRESERVED</span></footer>
       </section>
+      <dialog
+        ref={curatorDialogRef}
+        className="curator-dialog"
+        aria-labelledby="curator-dialog-title"
+        onCancel={(event) => {
+          event.preventDefault();
+          setCuratorExpanded(false);
+        }}
+        onKeyDown={handleCuratorKeyDown}
+        onClick={handleCuratorBackdrop}
+      >
+        <div className="curator-dialog-toolbar">
+          <h2 id="curator-dialog-title" className="visually-hidden">Expanded Curator view</h2>
+          <button className="curator-edit" type="button" onClick={closeCuratorAndEdit}>EDIT QUESTION</button>
+          <button className="curator-expanded-close" data-curator-close type="button" onClick={() => setCuratorExpanded(false)} aria-label="Close expanded Curator view">×</button>
+        </div>
+        <CuratorPanel
+          question={question}
+          onQuestionChange={setQuestion}
+          onSubmit={askCurator}
+          isAsking={isAsking}
+          error={curatorError}
+          result={curatorResult}
+          askedQuestion={lastQuestion}
+          onSourceOpen={openRecord}
+          expanded
+        />
+      </dialog>
       <section className="theory-panel" id="submit-theory" aria-labelledby="theory-title" data-reveal>
         <header className="theory-panel-heading">
           <div>

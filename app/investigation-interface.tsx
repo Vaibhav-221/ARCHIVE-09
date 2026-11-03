@@ -1033,23 +1033,23 @@ export default function InvestigationInterface({ archive }: InvestigationInterfa
                 <span className="document-tags-label">INDEX TERMS</span>
                 {activeRecord.tags.map((tag) => <span className="document-tag" key={tag}>#{tag}</span>)}
               </div>
-              <footer className="document-actions">
-                <span className="document-note">CONTENT PRESERVED AS FOUND</span>
-                <button
-                  type="button"
-                  className={`collect-button${savedIds.includes(activeRecord.id) ? " is-saved" : ""}`}
-                  onClick={() => {
-                    toggleEvidence(activeRecord.id);
-                    closeDocument();
-                  }}
-                  disabled={!notebookReady || !gameProgressReady}
-                  aria-pressed={savedIds.includes(activeRecord.id)}
-                >
-                  <span aria-hidden="true">{savedIds.includes(activeRecord.id) ? "✓" : "+"}</span>
-                  {savedIds.includes(activeRecord.id) ? "SAVED AS EVIDENCE" : "SAVE AS EVIDENCE"}
-                </button>
-              </footer>
             </div>
+            <footer className="document-actions">
+              <span className="document-note">CONTENT PRESERVED AS FOUND</span>
+              <button
+                type="button"
+                className={`collect-button${savedIds.includes(activeRecord.id) ? " is-saved" : ""}`}
+                onClick={() => {
+                  toggleEvidence(activeRecord.id);
+                  closeDocument();
+                }}
+                disabled={!notebookReady || !gameProgressReady}
+                aria-pressed={savedIds.includes(activeRecord.id)}
+              >
+                <span aria-hidden="true">{savedIds.includes(activeRecord.id) ? "✓" : "+"}</span>
+                {savedIds.includes(activeRecord.id) ? "SAVED AS EVIDENCE" : "SAVE AS EVIDENCE"}
+              </button>
+            </footer>
           </article>
         </dialog>
       )}

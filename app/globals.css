@@ -307,9 +307,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .document-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 25px; }
 .document-tags-label { margin-right: 3px; color: #96988d; font: 7px var(--font-mono); letter-spacing: .08em; }
 .document-tag { padding: 5px 7px; border: 1px solid #e0e1d6; color: #758074; font: 8px var(--font-mono); }
-.document-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 28px; padding-top: 14px; border-top: 1px solid #e1e1d7; }
+.document-actions { display: grid; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; margin: 0; padding: 14px clamp(20px, 5vw, 38px) max(16px, env(safe-area-inset-bottom)); border-top: 1px solid #e1e1d7; background: #fbfaf5; }
 .document-note { color: #9a9b91; font: 7px var(--font-mono); letter-spacing: .06em; }
-.document-actions .collect-button { min-height: 34px; padding: 0 11px; font-size: 8px; }
+.document-actions .collect-button { width: auto; min-width: 172px; min-height: 34px; justify-content: center; justify-self: end; padding: 0 11px; font-size: 8px; white-space: nowrap; }
 @keyframes document-rise { from { opacity: 0; transform: translateY(8px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 .floating-curator { position: fixed; z-index: 40; right: max(24px, calc((100vw - 1460px) / 2)); bottom: 24px; }
@@ -1021,8 +1021,6 @@ html[data-theme="dark"] .guide-signoff { border-color:#414b43; color:#d3a879 !im
   .source-list button { grid-template-columns:64px minmax(0,1fr); min-height:46px; }
   .browser-footer { gap:7px 12px; padding:10px 12px; line-height:1.5; }
   .page-footer { gap:7px 12px; line-height:1.5; }
-  .document-actions { position:sticky; bottom:-21px; z-index:2; align-items:center; flex-direction:row; margin:24px -17px -21px; padding:12px 17px; background:#fbfaf5; box-shadow:0 -8px 15px #0000000d; }
-  html[data-theme="dark"] .document-actions { background:#111615; box-shadow:0 -8px 15px #0006; }
   .document-note { display:none; }
   .document-actions .collect-button { width:100%; min-height:42px; font-size:9px; }
 }
@@ -1217,11 +1215,10 @@ html[data-theme="dark"] .theory-error { border-color:#d17461; background:#392522
   overflow:hidden;
 }
 .document-dialog[open] { display:flex; flex-direction:column; }
-.document-sheet { display:flex; min-height:0; flex:0 1 auto; flex-direction:column; }
+.document-sheet { display:flex; min-height:0; flex:1 1 auto; flex-direction:column; overflow:hidden; }
 .document-window-bar { flex:0 0 auto; }
-.document-body { min-height:0; flex:0 1 auto; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
-.document-actions { position:sticky; bottom:0; z-index:1; background:var(--paper); }
-html[data-theme="dark"] .document-actions { background:var(--paper); }
+.document-body { min-height:0; flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+html[data-theme="dark"] .document-actions { border-color:#353e38; background:#111615; }
 .about-dialog,html[data-theme="dark"] .about-dialog {
   max-height:min(820px,calc(100dvh - max(1rem,env(safe-area-inset-top)) - max(1rem,env(safe-area-inset-bottom))));
   overflow:hidden;
@@ -1251,8 +1248,7 @@ html[data-theme="dark"] .document-actions { background:var(--paper); }
     max-height:min(640px,calc(100dvh - max(1rem,env(safe-area-inset-top)) - max(1rem,env(safe-area-inset-bottom))));
     margin:auto;
   }
-  .document-body { padding-bottom:max(18px,env(safe-area-inset-bottom)); }
-  .document-actions { margin:18px 0 0; padding:12px 0 max(8px,env(safe-area-inset-bottom)); }
+  .document-actions { grid-template-columns:minmax(0,1fr); padding:12px 17px max(16px,env(safe-area-inset-bottom)); }
 }
 
 @media (max-width:390px) {
@@ -1261,29 +1257,9 @@ html[data-theme="dark"] .document-actions { background:var(--paper); }
   .document-dialog,html[data-theme="dark"] .document-dialog { width:calc(100vw - 1.25rem); }
 }
 
-@media (min-width:721px) {
-  .document-actions {
-    display:grid;
-    grid-template-columns:minmax(0,1fr) auto;
-    align-items:center;
-  }
-  .document-actions .collect-button {
-    width:auto;
-    min-width:172px;
-    justify-content:center;
-    justify-self:end;
-    white-space:nowrap;
-  }
-}
-
 @media (max-width:720px) {
-  .document-actions {
-    display:grid;
-    grid-template-columns:minmax(0,1fr);
-  }
   .document-actions .collect-button {
     width:100%;
-    justify-content:center;
   }
 }
 

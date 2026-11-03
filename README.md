@@ -15,6 +15,7 @@ All individuals, websites, records, logs, and events depicted in this project ar
 
 - [Overview & Gameplay Loop](#overview--gameplay-loop)
 - [Key Features](#key-features)
+- [Responsive Interface](#responsive-interface)
 - [Recovered Archive Directory](#recovered-archive-directory)
 - [System Architecture](#system-architecture)
 - [Theory Evaluation Engine](#theory-evaluation-engine)
@@ -58,6 +59,18 @@ flowchart LR
 - **AI Curator with Prompt Isolation:** Local Ollama integration (`qwen2.5-coder:3b`) protected by strict prompt isolation against jailbreaks and untrusted text injection. Model answers are shown only when citations match records in the evidence bundle; unavailable, timed-out, uncited, or invalid-citation responses use a deterministic archive-grounded fallback.
 - **Deterministic Curator Answers:** Specific questions about ARC-007 use its verified metadata explanation; requests for its exact message identify ARC-003 as the separate source. Operator-identity questions and broad post-shutdown activity questions use concise, cited archive syntheses that preserve the evidence limits.
 - **Deterministic Evaluation Engine:** Server-side theory validation separating player role selections from evidential strength, preventing false reports of missing complicating evidence, and keeping canonical conclusions strictly segregated from player hypotheses.
+- **Responsive Investigation Tools:** The evidence notebook and Curator remain usable across phone, tablet, and desktop layouts. Notebook records retain their natural row height when only one item is saved, and longer lists scroll within the notebook.
+- **Expanded Curator (Tablet & Desktop):** Open a larger, centered Curator dialog on tablet and desktop. Its question, answer, and sources stay synchronized with the main panel. Close it with the close button, Escape, or an outside click; use **Edit Question** to return to the main input. The expanded control is not shown on phones.
+
+---
+
+## Responsive Interface
+
+The archive and investigation tools adapt to narrow phone screens as well as tablet and desktop widths. The record browser, evidence notebook, and Curator response area use contained scrolling where needed so lengthy content remains readable without stretching the surrounding layout.
+
+On tablet and desktop, the expand control in the Curator heading opens a centered dialog with a larger reading area. The dialog uses the same state and request handling as the Curator panel on the page, so editing the question or asking for an answer in either view updates the shared conversation. Closing the dialog restores focus to the appropriate control. At phone widths, the expand control is hidden and an open dialog closes when the viewport becomes narrow.
+
+In the evidence notebook, one saved record occupies only its natural row height; multiple records scroll inside the list rather than being stretched to fill the panel.
 
 ---
 
@@ -278,6 +291,15 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+### 4. Build and Run in Production
+
+```bash
+npm run build
+npm run start
+```
+
+The production server uses [http://localhost:3000](http://localhost:3000) by default. Stop the development server before starting production on the same port.
+
 ---
 
 ## Configuration & Environment Variables
@@ -304,11 +326,11 @@ npm test
 # Run ESLint validation
 npm run lint
 
-# Run TypeScript typechecks
+# Run a standalone TypeScript check
 npx tsc --noEmit
 
-# Run production build (webpack mode on Windows)
-npx next build --webpack
+# Create an optimized production build
+npm run build
 ```
 
 ### Test Coverage Highlights
@@ -318,3 +340,5 @@ npx next build --webpack
 - **Prompt Injection Defense:** Validates that system prompt boundaries isolate untrusted archive strings.
 - **Curator Citation Checks:** Asserts that model responses without verified archive citations are rejected (HTTP 502).
 - **Theory Evaluation Regressions:** Validates exact 3-record submissions, counter-evidence role preservation, minimum record enforcement, and separation of canonical conclusions from player hypotheses.
+
+Before release, run the automated checks above and manually verify the responsive interface at phone width (up to 720px) and tablet/desktop width (721px and above). On tablet or desktop, confirm the expanded Curator stays centered, shares the main panel's question and response, and closes from its close button, Escape, and an outside click. On phones, confirm the expand control is hidden. In the evidence notebook, confirm one saved record stays at natural height and multiple records remain scrollable.
